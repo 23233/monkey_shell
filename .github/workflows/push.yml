@@ -12,9 +12,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v2
 
-      - name: Create index.html
+      - name: Copy files
         run: |
           mkdir docs
+          cp *.js docs
+      - name: Create index.html
+        run: |
           echo "<!DOCTYPE html>" > docs/index.html
           echo "<html>" >> docs/index.html
           echo "<head>" >> docs/index.html
@@ -29,6 +32,9 @@ jobs:
           echo "    </ul>" >> docs/index.html
           echo "</body>" >> docs/index.html
           echo "</html>" >> docs/index.html
+      - name: Copy .nojekyll
+        run: |
+          echo "" > docs/.nojekyll
 
       - name: Deploy
         uses: peaceiris/actions-gh-pages@v3
