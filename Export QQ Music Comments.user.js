@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Export QQ Music Comments
 // @namespace    https://github.com/23233/monkey_shell
-// @version      0.2
+// @version      0.3
 // @description  export qq music comments
 // @author       23233
 // @match        https://y.qq.com/n/ryqq/songDetail/*
@@ -9,13 +9,27 @@
 // @grant        none
 // ==/UserScript==
 
-(function() {
+(function () {
     'use strict';
 
     // 测试url https://y.qq.com/n/ryqq/songDetail/000AtQJq0pkLGn
+    let exportBtn = document.createElement('button');
 
-    let cmIds = [];
+    function createObservableArray(arr, callback) {
+        return new Proxy(arr, {
+            set: function(target, property, value, receiver) {
+                target[property] = value;
+                if (property !== 'length') {
+                    callback(target);
+                }
+                return true;
+            }
+        });
+    }
 
+    let cmIds = createObservableArray([], function(arr) {
+        exportBtn.textContent = `导出${arr.length}条评论`;
+    });
 
     // 保存原始的XMLHttpRequest对象
     const originalXHR = window.XMLHttpRequest;
@@ -35,7 +49,7 @@
         if (req.data.CommentList3) {
             comments = comments.concat(req.data.CommentList3.Comments);
         }
-        console.log("page datas",comments)
+
         return comments.map(item => {
             return {
                 CmId: item.CmId,
@@ -47,24 +61,21 @@
 
 
     // 重新定义XMLHttpRequest
-    window.XMLHttpRequest = function() {
+    window.XMLHttpRequest = function () {
         const xhr = new originalXHR();
 
         // 重写open方法
         const open = xhr.open;
-        xhr.open = function() {
-            console.log('XHR request intercepted:', arguments);
+        xhr.open = function () {
             if (arguments[0] === 'POST' && arguments[1].includes('musics.fcg')) {
                 // 添加拦截处理
-                xhr.addEventListener('load', function() {
+                xhr.addEventListener('load', function () {
                     const data = JSON.parse(this.responseText);
-                    if (data.req_3 && data.req_3.data) {
-                        console.log("req3")
-                        cmIds = [...cmIds,...parseResponse(data.req_3)]
-                    }else if (data.req_1 && data.req_1.data.CommentList){
-                        console.log("req_1")
-                        cmIds = [...cmIds,...parseResponse(data.req_1)]
-                    }
+                    Object.keys(data).forEach(key => {
+                        if (key.startsWith('req_') && data[key].data && data[key].data.CommentList) {
+                            cmIds.push(...parseResponse(data[key]));
+                        }
+                    });
 
                 });
             }
@@ -76,8 +87,7 @@
         return xhr;
     };
 
-    window.addEventListener('load', function() {
-        let exportBtn = document.createElement('button');
+    window.addEventListener('load', function () {
         exportBtn.textContent = '导出评论';
         exportBtn.addEventListener('click', exportComments);
 
@@ -106,7 +116,7 @@
         let blob = new Blob([content], {type: 'application/json'});
         let url = URL.createObjectURL(blob);
         let a = document.createElement('a');
-        a.download = songId + '.json'; // 拼接歌曲ID作为文件名
+        a.download = `${songId}_${cmIds.length}.json`; // 拼接歌曲ID作为文件名
         a.href = url;
         a.click();
     }
