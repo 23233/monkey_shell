@@ -98,7 +98,7 @@
                 var data = cookies.map(cookie => cookie.name + '=' + cookie.value).join('; ');
                 callback(data);
             } else {
-                console.warining("GM_cookie不受支持 回退到document.cookie 无法获取到httpOnly的key")
+                console.warn("GM_cookie不受支持 回退到document.cookie 无法获取到httpOnly的key")
                 callback(document.cookie);
             }
         });
@@ -115,7 +115,7 @@
                 value: parts[1]
             }, function(error) {
                 if (error) {
-                    console.warining("GM_cookie不受支持 回退到document.cookie 无法获取到httpOnly的key")
+                    console.warn("GM_cookie不受支持 回退到document.cookie 无法获取到httpOnly的key")
                     document.cookie = parts[0] + '=' + parts[1];
                 }
             });
