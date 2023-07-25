@@ -16,20 +16,23 @@
     var button = document.createElement('button');
     button.innerHTML = '&#9881;';
     button.style.position = 'fixed';
-    button.style.bottom = '10px';
+    button.style.bottom = '65px';
     button.style.right = '10px';
+    button.style.zIndex = '9999';
+    button.style.fontSize = '24px'
     document.body.appendChild(button);
 
     // Create a popup layer
     var popup = document.createElement('div');
     popup.style.position = 'fixed';
-    popup.style.bottom = '50px';
+    popup.style.bottom = '95px';
     popup.style.right = '10px';
     popup.style.background = '#fff';
     popup.style.border = '1px solid #000';
     popup.style.padding = '10px';
     popup.style.display = 'none';
     popup.style.width = '300px';
+    popup.style.zIndex = '9999';
     document.body.appendChild(popup);
 
     // Create tabs
@@ -42,11 +45,14 @@
     var tabButtonDiv = document.createElement('div');
     tabButtonDiv.style.display = 'flex';
     tabButtonDiv.style.justifyContent = 'space-between';
+    tabButtonDiv.style.flexWrap = 'wrap';
+    tabButtonDiv.style.gap = '2px';
     popup.appendChild(tabButtonDiv);
 
     tabs.forEach(function(tab) {
         var tabButton = document.createElement('button');
         tabButton.textContent = tab;
+        tabButton.style.fontSize = '14px'
         tabButtonDiv.appendChild(tabButton);
 
         var div = document.createElement('div');
