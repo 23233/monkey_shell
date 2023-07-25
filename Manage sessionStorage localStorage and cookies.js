@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Manage sessionStorage localStorage and cookies
-// @namespace    http://tampermonkey.net/
+// @namespace    https://github.com/23233/monkey_shell
 // @version      0.1
 // @description  若要启用GM_cookie 需要Beta版本的tampermonkey 否则只支持document.cookie
 // @author       23233
