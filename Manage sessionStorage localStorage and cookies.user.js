@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Manage sessionStorage localStorage and cookies
 // @namespace    https://github.com/23233/monkey_shell
-// @version      0.3
+// @version      0.4
 // @description  若要启用GM_cookie 需要Beta版本的tampermonkey 否则只支持document.cookie
 // @author       23233
 // @match        *://*/*
@@ -11,6 +11,35 @@
 
 (function() {
     'use strict';
+
+    // Create the toast function
+    window.Toast = function(message, duration) {
+        // Create the toast element
+        var toast = document.createElement("div");
+        toast.textContent = message;
+        toast.style.position = "fixed";
+        toast.style.bottom = "20px";
+        toast.style.left = "50%";
+        toast.style.transform = "translateX(-50%)";
+        toast.style.backgroundColor = "black";
+        toast.style.color = "white";
+        toast.style.padding = "10px";
+        toast.style.borderRadius = "5px";
+        toast.style.zIndex = "9999";
+        toast.style.textAlign = "center";
+        document.body.appendChild(toast);
+
+        // Remove the toast after the specified duration
+        setTimeout(function() {
+            toast.parentNode.removeChild(toast);
+        }, duration);
+
+        // Remove the toast when it's clicked
+        toast.addEventListener("click", function() {
+            toast.parentNode.removeChild(toast);
+        });
+    };
+
 
     // Create a floating gear button
     var button = document.createElement('button');
@@ -107,6 +136,7 @@
                 callback(data);
             } else {
                 console.warn("GM_cookie不受支持 回退到document.cookie 无法获取到httpOnly的key")
+                window.Toast("当前不支持GM_cookie 回退到document.cookie 无法获取到httpOnly的key",3000)
                 callback(document.cookie);
             }
         });
@@ -114,6 +144,10 @@
 
     // Function to set cookies
     function setCookies(data) {
+        if (!data.length){
+            window.Toast("请输入cookies后重试",3000)
+            return false
+        }
         var cookies = data.split('; ');
         cookies.forEach(function(cookie) {
             var parts = cookie.split('=');
@@ -123,11 +157,13 @@
                 value: parts[1]
             }, function(error) {
                 if (error) {
-                    console.warn("GM_cookie不受支持 回退到document.cookie 无法获取到httpOnly的key")
+                    console.warn(error,"GM_cookie不受支持 回退到document.cookie 无法获取到httpOnly的key")
+                    window.Toast("当前不支持GM_cookie 回退到document.cookie 无法获取到httpOnly的key",3000)
                     document.cookie = parts[0] + '=' + parts[1];
                 }
             });
         });
+        return true
     }
 
     // Function to get storage as JSON
@@ -161,21 +197,29 @@
                 getCookies(function(data) {
                     GM_setClipboard(data);
                     textareas[tab].value = data;
+                    window.Toast("获取cookies成功",3000)
+
                 });
             } else {
                 var data = getStorageAsJson(window[tab]);
                 GM_setClipboard(data);
                 textareas[tab].value = data;
+                window.Toast(`获取${tab}成功`,3000)
             }
         });
 
         setButtons[tab].addEventListener('click', function() {
             var data = textareas[tab].value;
             if (tab === 'cookies') {
-                setCookies(data);
+                if (setCookies(data)){
+                    window.Toast("设置cookies成功",3000)
+                }
+
             } else {
                 setStorageFromJson(window[tab], data);
+                window.Toast(`设置${tab}成功`,3000)
             }
+
         });
     });
 })();
