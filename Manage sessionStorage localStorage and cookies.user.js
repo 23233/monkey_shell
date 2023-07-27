@@ -13,9 +13,9 @@
     'use strict';
 
     // Create the toast function
-    window.Toast = function(message, duration) {
+    const Toast = (message, duration) =>{
         // Create the toast element
-        var toast = document.createElement("div");
+        const toast = document.createElement("div");
         toast.textContent = message;
         toast.style.position = "fixed";
         toast.style.bottom = "20px";
@@ -136,7 +136,7 @@
                 callback(data);
             } else {
                 console.warn("GM_cookie不受支持 回退到document.cookie 无法获取到httpOnly的key")
-                window.Toast("当前不支持GM_cookie 回退到document.cookie 无法获取到httpOnly的key",3000)
+                Toast("当前不支持GM_cookie 回退到document.cookie 无法获取到httpOnly的key",3000)
                 callback(document.cookie);
             }
         });
@@ -145,7 +145,7 @@
     // Function to set cookies
     function setCookies(data) {
         if (!data.length){
-            window.Toast("请输入cookies后重试",3000)
+            Toast("请输入cookies后重试",3000)
             return false
         }
         var cookies = data.split('; ');
@@ -158,7 +158,7 @@
             }, function(error) {
                 if (error) {
                     console.warn(error,"GM_cookie不受支持 回退到document.cookie 无法获取到httpOnly的key")
-                    window.Toast("当前不支持GM_cookie 回退到document.cookie 无法获取到httpOnly的key",3000)
+                    Toast("当前不支持GM_cookie 回退到document.cookie 无法获取到httpOnly的key",3000)
                     document.cookie = parts[0] + '=' + parts[1];
                 }
             });
@@ -197,14 +197,14 @@
                 getCookies(function(data) {
                     GM_setClipboard(data);
                     textareas[tab].value = data;
-                    window.Toast("获取cookies成功",3000)
+                    Toast("获取cookies成功",3000)
 
                 });
             } else {
                 var data = getStorageAsJson(window[tab]);
                 GM_setClipboard(data);
                 textareas[tab].value = data;
-                window.Toast(`获取${tab}成功`,3000)
+                Toast(`获取${tab}成功`,3000)
             }
         });
 
@@ -212,12 +212,12 @@
             var data = textareas[tab].value;
             if (tab === 'cookies') {
                 if (setCookies(data)){
-                    window.Toast("设置cookies成功",3000)
+                    Toast("设置cookies成功",3000)
                 }
 
             } else {
                 setStorageFromJson(window[tab], data);
-                window.Toast(`设置${tab}成功`,3000)
+                Toast(`设置${tab}成功`,3000)
             }
 
         });
