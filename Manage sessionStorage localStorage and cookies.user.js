@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Manage sessionStorage localStorage and cookies
 // @namespace    https://github.com/23233/monkey_shell
-// @version      0.4
+// @version      0.5
 // @description  若要启用GM_cookie 需要Beta版本的tampermonkey 否则只支持document.cookie
 // @author       23233
 // @match        *://*/*
@@ -9,11 +9,11 @@
 // @grant        GM_cookie
 // ==/UserScript==
 
-(function() {
+(function () {
     'use strict';
 
     // Create the toast function
-    const Toast = (message, duration) =>{
+    const Toast = (message, duration) => {
         // Create the toast element
         const toast = document.createElement("div");
         toast.textContent = message;
@@ -30,12 +30,12 @@
         document.body.appendChild(toast);
 
         // Remove the toast after the specified duration
-        setTimeout(function() {
+        setTimeout(function () {
             toast.parentNode.removeChild(toast);
         }, duration);
 
         // Remove the toast when it's clicked
-        toast.addEventListener("click", function() {
+        toast.addEventListener("click", function () {
             toast.parentNode.removeChild(toast);
         });
     };
@@ -72,6 +72,7 @@
     var textareas = {};
     var getButtons = {};
     var setButtons = {};
+    var clearButtons = {};  // Add this line
 
     var tabButtonDiv = document.createElement('div');
     tabButtonDiv.style.display = 'flex';
@@ -80,7 +81,7 @@
     tabButtonDiv.style.gap = '2px';
     popup.appendChild(tabButtonDiv);
 
-    tabs.forEach(function(tab) {
+    tabs.forEach(function (tab) {
         var tabButton = document.createElement('button');
         tabButton.textContent = tab;
         tabButton.style.fontSize = '14px'
@@ -107,18 +108,23 @@
         buttonDiv.appendChild(setButton);
         setButtons[tab] = setButton;
 
+        var clearButton = document.createElement('button');  // Add this block
+        clearButton.textContent = 'Clear';
+        buttonDiv.appendChild(clearButton);
+        clearButtons[tab] = clearButton;
+
         var getButton = document.createElement('button');
         getButton.textContent = 'Get';
         buttonDiv.appendChild(getButton);
         getButtons[tab] = getButton;
 
         // Tab button click event
-        tabButton.addEventListener('click', function() {
-            tabs.forEach(function(otherTab) {
+        tabButton.addEventListener('click', function () {
+            tabs.forEach(function (otherTab) {
                 tabDivs[otherTab].style.display = otherTab === tab ? 'block' : 'none';
             });
             if (tab === 'cookies') {
-                getCookies(function(data) {
+                getCookies(function (data) {
                     textareas[tab].value = data;
                 });
             } else {
@@ -130,13 +136,14 @@
 
     // Function to get cookies
     function getCookies(callback) {
-        GM_cookie.list({}, function(cookies, error) {
+        GM_cookie.list({}, function (cookies, error) {
             if (!error) {
                 var data = cookies.map(cookie => cookie.name + '=' + cookie.value).join('; ');
                 callback(data);
             } else {
+
                 console.warn("GM_cookie不受支持 回退到document.cookie 无法获取到httpOnly的key")
-                Toast("当前不支持GM_cookie 回退到document.cookie 无法获取到httpOnly的key",3000)
+                Toast("当前不支持GM_cookie 回退到document.cookie 无法获取到httpOnly的key", 3000)
                 callback(document.cookie);
             }
         });
@@ -144,26 +151,44 @@
 
     // Function to set cookies
     function setCookies(data) {
-        if (!data.length){
-            Toast("请输入cookies后重试",3000)
+        if (!data.length) {
+            Toast("请输入cookies后重试", 3000)
             return false
         }
         var cookies = data.split('; ');
-        cookies.forEach(function(cookie) {
+        cookies.forEach(function (cookie) {
             var parts = cookie.split('=');
             GM_cookie.set({
                 url: window.location.href,
-                name: parts[0],
-                value: parts[1]
-            }, function(error) {
+                name: parts[0].trim(),
+                value: parts[1].trim()
+            }, function (error) {
                 if (error) {
-                    console.warn(error,"GM_cookie不受支持 回退到document.cookie 无法获取到httpOnly的key")
-                    Toast("当前不支持GM_cookie 回退到document.cookie 无法获取到httpOnly的key",3000)
+                    console.warn(error, "GM_cookie不受支持 回退到document.cookie 无法获取到httpOnly的key")
+                    Toast("当前不支持GM_cookie 回退到document.cookie 无法获取到httpOnly的key", 3000)
                     document.cookie = parts[0] + '=' + parts[1];
                 }
             });
         });
         return true
+    }
+
+    // Function to clear cookies
+    function clearCookies() {
+        GM_cookie.list({}, function (cookies, error) {
+            if (!error) {
+                cookies.forEach(function (cookie) {
+                    GM_cookie.delete({
+                        url: window.location.href,
+                        name: cookie.name
+                    });
+                });
+                Toast("清除cookies成功", 3000)
+            } else {
+                console.warn("GM_cookie不受支持 无法清除httpOnly的key")
+                Toast("当前不支持GM_cookie 无法清除httpOnly的key", 3000)
+            }
+        });
     }
 
     // Function to get storage as JSON
@@ -185,41 +210,56 @@
         }
     }
 
+    // Function to clear storage
+    function clearStorage(storage) {
+        storage.clear();
+    }
+
     // Button click event
-    button.addEventListener('click', function() {
+    button.addEventListener('click', function () {
         popup.style.display = popup.style.display === 'none' ? 'block' : 'none';
     });
 
-    // Get and set button click events
-    tabs.forEach(function(tab) {
-        getButtons[tab].addEventListener('click', function() {
+    // Get, set and clear button click events
+    tabs.forEach(function (tab) {
+        getButtons[tab].addEventListener('click', function () {
             if (tab === 'cookies') {
-                getCookies(function(data) {
+                getCookies(function (data) {
                     GM_setClipboard(data);
                     textareas[tab].value = data;
-                    Toast("获取cookies成功",3000)
+                    Toast("获取cookies成功", 3000)
 
                 });
             } else {
                 var data = getStorageAsJson(window[tab]);
                 GM_setClipboard(data);
                 textareas[tab].value = data;
-                Toast(`获取${tab}成功`,3000)
+                Toast(`获取${tab}成功`, 3000)
             }
         });
 
-        setButtons[tab].addEventListener('click', function() {
+        setButtons[tab].addEventListener('click', function () {
             var data = textareas[tab].value;
             if (tab === 'cookies') {
-                if (setCookies(data)){
-                    Toast("设置cookies成功",3000)
+                if (setCookies(data)) {
+                    Toast("设置cookies成功", 3000)
                 }
 
             } else {
                 setStorageFromJson(window[tab], data);
-                Toast(`设置${tab}成功`,3000)
+                Toast(`设置${tab}成功`, 3000)
             }
 
+        });
+
+        clearButtons[tab].addEventListener('click', function () {  // Add this block
+            if (tab === 'cookies') {
+                clearCookies();
+            } else {
+                clearStorage(window[tab]);
+                Toast(`清除${tab}成功`, 3000)
+            }
+            textareas[tab].value = '';
         });
     });
 })();
