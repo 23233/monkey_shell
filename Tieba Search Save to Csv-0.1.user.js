@@ -11,7 +11,7 @@
 
 (function() {
     'use strict';
-    // 创建并添加按钮到页面
+     // 创建并添加按钮到页面
     const button = document.createElement('button');
     button.textContent = '导出CSV';
     button.style.position = 'fixed';
@@ -23,22 +23,23 @@
     // 定义一个函数来提取数据并转换为CSV格式
     function extractDataToCSV() {
         const items = document.querySelectorAll('.forum-item');
-        let csvContent = '"fid","name","member","post"\n';
+        let csvContent = '"fid","name","member","post","desc"\n';
 
         items.forEach(item => {
             const fid = item.querySelector('a[data-fid]').getAttribute('data-fid');
             const name = item.querySelector('.forum-name').textContent.trim();
             const member = item.querySelector('.member-icon + span').textContent.trim();
             const post = item.querySelector('.post-icon + span').textContent.trim();
+            const desc = item.querySelector('.forum-brief').textContent.trim();
 
             // 仅当post大于1000时添加到CSV
             if (parseInt(post, 10) > 1000) {
-                csvContent += `"${fid}","${name}","${member}","${post}"\n`;
+                csvContent += `"${fid}","${name}","${member}","${post}","${desc}"\n`;
             }
         });
 
         // 创建并下载CSV文件
-        if (csvContent !== '"fid","name","member","post"\n') {
+        if (csvContent !== '"fid","name","member","post","desc"\n') {
             const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
             const link = document.createElement("a");
             const url = URL.createObjectURL(blob);
@@ -54,9 +55,9 @@
     // 从URL中提取kw和pn参数并生成文件名
     function generateFileName() {
         const params = new URLSearchParams(window.location.search);
-        const kw = params.get('qw') || 'default_qw';
+        const qw = params.get('qw') || 'default_qw';
         const pn = params.get('pn') || 'default_pn';
-        return `${kw}_${pn}_data.csv`;
+        return `${qw}_${pn}_data.csv`;
     }
 
     // 为按钮添加点击事件监听器
