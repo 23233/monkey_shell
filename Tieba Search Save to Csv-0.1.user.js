@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Tieba Search Save to Csv
 // @namespace    http://tampermonkey.net/
-// @version      0.2
+// @version      0.3
 // @description  把贴吧搜索的结果每一页保存下载
 // @author       23233
 // @match        https://tieba.baidu.com/f/search/fm?*
@@ -30,7 +30,7 @@
             const name = item.querySelector('.forum-name').textContent.trim();
             const member = item.querySelector('.member-icon + span').textContent.trim();
             const post = item.querySelector('.post-icon + span').textContent.trim();
-            const desc = item.querySelector('.forum-brief').textContent.trim();
+            const desc = item.querySelector('.forum-brief')?.textContent?.trim();
 
             // 仅当post大于1000并且member大于100时添加到CSV
             if (parseInt(post, 10) > 1000 && parseInt(member,10)> 100) {
