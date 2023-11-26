@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Extract Aws Ip Data
 // @namespace    http://tampermonkey.net/
-// @version      0.1
+// @version      0.2
 // @description  获取出AWS中所有的EC2 IP地址
 // @author       23233
 // @match        https://console.amazonaws.cn/ec2/home?region=cn-north-1
@@ -29,7 +29,7 @@
         const cellValues = [];
 
         // Get the first iframe element
-        const iframe = document.querySelector("iframe");
+        const iframe = document.getElementById("compute-react-frame");
 
         // Get the iframe's document object
         const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
