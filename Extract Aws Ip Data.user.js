@@ -4,7 +4,7 @@
 // @version      0.2
 // @description  获取出AWS中所有的EC2 IP地址
 // @author       23233
-// @match        https://console.amazonaws.cn/ec2/home?region=cn-north-1
+// @match        https://*.amazonaws.cn/ec2/home?*
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=amazonaws.cn
 // @grant        none
 // ==/UserScript==
