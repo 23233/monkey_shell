@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Manage sessionStorage localStorage and cookies
 // @namespace    https://github.com/23233/monkey_shell
-// @version      0.5
+// @version      0.6
 // @description  若要启用GM_cookie 需要Beta版本的tampermonkey 否则只支持document.cookie
 // @author       23233
 // @match        *://*/*
@@ -73,6 +73,7 @@
     var getButtons = {};
     var setButtons = {};
     var clearButtons = {};  // Add this line
+
 
     var tabButtonDiv = document.createElement('div');
     tabButtonDiv.style.display = 'flex';
@@ -262,4 +263,76 @@
             textareas[tab].value = '';
         });
     });
+
+
+    // 额外的全局变量
+    var pathListDiv;
+    var cookiePaths = {};
+    tabs.push('cookiePaths');
+
+    // 创建Cookie路径标签和内容
+    var cookiePathsTabButton = document.createElement('button');
+    cookiePathsTabButton.textContent = 'Cookie路径';
+    cookiePathsTabButton.style.fontSize = '14px';
+    tabButtonDiv.appendChild(cookiePathsTabButton);
+
+    var cookiePathsDiv = document.createElement('div');
+    cookiePathsDiv.style.display = 'none';
+    popup.appendChild(cookiePathsDiv);
+    tabDivs['cookiePaths'] = cookiePathsDiv;
+
+    pathListDiv = document.createElement('div');
+    pathListDiv.style.overflow = 'auto';
+    pathListDiv.style.height = '150px';
+    pathListDiv.style.marginBottom = '10px';
+    cookiePathsDiv.appendChild(pathListDiv);
+    // Cookie路径标签按钮点击事件
+    cookiePathsTabButton.addEventListener('click', function () {
+        tabs.forEach(function (otherTab) {
+            tabDivs[otherTab].style.display = otherTab === 'cookiePaths' ? 'block' : 'none';
+        });
+        listCookiePaths();
+    });
+
+
+    function listCookiePaths() {
+        GM_cookie.list({}, function (cookies, error) {
+            if (!error) {
+                cookiePaths = {};
+                cookies.forEach(cookie => {
+                    const path = cookie.path || '/';
+                    if (!cookiePaths[path]) {
+                        cookiePaths[path] = [];
+                    }
+                    cookiePaths[path].push(cookie);
+                });
+
+                // 清空现有列表并重新构建
+                pathListDiv.innerHTML = '';
+                for (const path in cookiePaths) {
+                    const pathItem = document.createElement('div');
+                    pathItem.textContent = path;
+                    pathItem.style.cursor = 'pointer';
+                    pathItem.style.padding = '5px';
+                    pathItem.style.border = '1px solid #ccc';
+                    pathItem.style.marginBottom = '2px';
+
+                    // 点击事件以复制特定路径的Cookie
+                    pathItem.addEventListener('click', function () {
+                        const cookiesForPath = cookiePaths[path];
+                        const cookieStr = cookiesForPath.map(cookie => `${cookie.name}=${cookie.value}`).join('; ');
+                        GM_setClipboard(cookieStr);
+                        Toast(`已复制路径${path}的Cookie`, 3000);
+                    });
+
+                    pathListDiv.appendChild(pathItem);
+                }
+            } else {
+                Toast("列出Cookie路径时出错", 3000);
+            }
+        });
+    }
+
+
+
 })();
