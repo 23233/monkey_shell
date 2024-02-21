@@ -7,11 +7,40 @@
 // @match        https://*music.163.com/*
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=163.com
 // @grant        GM_setClipboard
+// @grant        GM_cookie
 // ==/UserScript==
 
 (function() {
     'use strict';
     const storageKey = 'music163_utilities';
+
+    const Toast = (message, duration) => {
+        // Create the toast element
+        const toast = document.createElement("div");
+        toast.textContent = message;
+        toast.style.position = "fixed";
+        toast.style.bottom = "20px";
+        toast.style.left = "50%";
+        toast.style.transform = "translateX(-50%)";
+        toast.style.backgroundColor = "black";
+        toast.style.color = "white";
+        toast.style.padding = "10px";
+        toast.style.borderRadius = "5px";
+        toast.style.zIndex = "9999";
+        toast.style.textAlign = "center";
+        document.body.appendChild(toast);
+
+        // Remove the toast after the specified duration
+        setTimeout(function () {
+            toast.parentNode.removeChild(toast);
+        }, duration);
+
+        // Remove the toast when it's clicked
+        toast.addEventListener("click", function () {
+            toast.parentNode.removeChild(toast);
+        });
+    };
+
 
     function loadUtilities() {
         return JSON.parse(localStorage.getItem(storageKey) || '[]');
@@ -29,13 +58,71 @@
             <button class="edit">修改</button>
             <button class="delete">删除</button>
             <button class="copy">复制</button>
+            <button class="set">设置</button>
         `;
 
         container.querySelector('.edit').onclick = () => editUtility(utility);
         container.querySelector('.delete').onclick = () => deleteUtility(utility);
-        container.querySelector('.copy').onclick = () => GM_setClipboard(utility.ck);
+        container.querySelector('.copy').onclick = () => onCopy(utility.ck);
+        container.querySelector('.set').onclick = () => onSet(utility.ck);
 
         return container;
+    }
+
+    function onSet(ck){
+        clearCookies(function () {
+            setCookies(ck)
+        })
+    }
+
+    function setCookies(data) {
+        if (!data.length) {
+            Toast("请输入cookies后重试", 3000)
+            return false
+        }
+        var cookies = data.split(';');
+        cookies.forEach(function (cookie) {
+            var parts = cookie.split('=');
+            GM_cookie.set({
+                url: window.location.href,
+                name: parts[0].trim(),
+                value: parts[1].trim()
+            }, function (error) {
+                if (error) {
+                    console.warn(error, "GM_cookie不受支持 回退到document.cookie 无法获取到httpOnly的key")
+                    Toast("当前不支持GM_cookie 回退到document.cookie 无法获取到httpOnly的key", 3000)
+                    document.cookie = parts[0] + '=' + parts[1];
+                }
+            });
+        });
+        Toast("设置cookie成功",3000)
+        return true
+    }
+
+    // Function to clear cookies
+    function clearCookies(cb) {
+        GM_cookie.list({}, function (cookies, error) {
+            if (!error) {
+                cookies.forEach(function (cookie) {
+                    GM_cookie.delete({
+                        url: window.location.href,
+                        name: cookie.name
+                    });
+                });
+                Toast("清除cookies成功", 3000)
+                cb && cb()
+            } else {
+                console.warn("GM_cookie不受支持 无法清除httpOnly的key")
+                Toast("当前不支持GM_cookie 无法清除httpOnly的key", 3000)
+            }
+        });
+    }
+
+
+
+    function onCopy(text){
+        GM_setClipboard(text)
+        Toast("复制成功",1000)
     }
 
     function editUtility(utility) {
@@ -156,7 +243,7 @@
                 margin-bottom:5px;
             }
             .utility-item span {
-                width:60px;
+                width:100px;
                 display:inline-block;
                 font-size:14px;
 

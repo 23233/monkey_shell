@@ -156,7 +156,7 @@
             Toast("请输入cookies后重试", 3000)
             return false
         }
-        var cookies = data.split('; ');
+        var cookies = data.split(';');
         cookies.forEach(function (cookie) {
             var parts = cookie.split('=');
             GM_cookie.set({
