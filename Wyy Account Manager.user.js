@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         网易云账号管理器
 // @namespace    http://tampermonkey.net/
-// @version      2024-02-22
+// @version      2024-02-22-01
 // @description  记录ck,保存ck
 // @author       23233
 // @match        https://*music.163.com/*
@@ -120,7 +120,19 @@
         });
     }
 
+    function getCookies(callback) {
+        GM_cookie.list({}, function (cookies, error) {
+            if (!error) {
+                var data = cookies.map(cookie => cookie.name + '=' + cookie.value).join('; ');
+                callback(data);
+            } else {
 
+                console.warn("GM_cookie不受支持 回退到document.cookie 无法获取到httpOnly的key")
+                Toast("当前不支持GM_cookie 回退到document.cookie 无法获取到httpOnly的key", 3000)
+                callback(document.cookie);
+            }
+        });
+    }
 
     function onCopy(text){
         GM_setClipboard(text)
@@ -159,6 +171,46 @@
         }
     }
 
+    function getDefaultUserName() {
+        try {
+            let contentIframe = document.getElementById('g_iframe');
+            let iframeDoc = contentIframe.contentDocument ? contentIframe.contentDocument : contentIframe.contentWindow.document;
+            let targetElement = iframeDoc.querySelector('#j-name-wrap span.tit');
+            if (targetElement){
+                return targetElement.innerText
+            }
+        }catch (e) {
+            console.error("获取默认用户名失败",e)
+        }
+
+        return ""
+
+    }
+
+    function containsRequiredSubstrings(str) {
+        return str.includes("MUSIC_U") && str.includes("__csrf");
+    }
+
+    function nowAddUtility() {
+        getCookies(function (cookie) {
+            if (containsRequiredSubstrings(cookie)){
+                const defaultName = getDefaultUserName()
+                console.log("defaultName",defaultName)
+                const name = prompt('请输入名称',defaultName);
+                const ck = prompt('请输入CK',cookie);
+                if (name && ck) {
+                    const utilities = loadUtilities();
+                    utilities.push({ name, ck });
+                    saveUtilities(utilities);
+                    render();
+                }
+            }else{
+                alert("检测到cookie未登录 不能从当前新增")
+            }
+        })
+    }
+
+
     function render() {
         const utilities = loadUtilities();
         const panel = document.querySelector('.utility-panel');
@@ -168,12 +220,14 @@
         <button id="add-utility-btn">新增</button>
         <button id="import-utility-btn">导入</button>
         <button id="export-utility-btn">导出</button>
+        <button id="now-add-btn">从当前新增</button>
     `;
 
         // 绑定按钮的点击事件
         document.querySelector('#add-utility-btn').onclick = addUtility; // 假设你有一个添加实用程序的函数
         document.querySelector('#import-utility-btn').onclick = importUtilities;
         document.querySelector('#export-utility-btn').onclick = exportUtilities;
+        document.querySelector('#now-add-btn').onclick = nowAddUtility;
 
         // 下面的代码逻辑保持不变，用于加载并显示utility列表
         utilities.forEach(utility => {
