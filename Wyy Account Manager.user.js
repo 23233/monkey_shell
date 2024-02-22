@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         网易云账号管理器
 // @namespace    http://tampermonkey.net/
-// @version      2024-02-21
+// @version      2024-02-22
 // @description  记录ck,保存ck
 // @author       23233
 // @match        https://*music.163.com/*
@@ -72,6 +72,7 @@
     function onSet(ck){
         clearCookies(function () {
             setCookies(ck)
+
         })
     }
 
@@ -84,7 +85,8 @@
         cookies.forEach(function (cookie) {
             var parts = cookie.split('=');
             GM_cookie.set({
-                url: window.location.href,
+                url:window.location.href,
+                domain: ".music.163.com",
                 name: parts[0].trim(),
                 value: parts[1].trim()
             }, function (error) {
