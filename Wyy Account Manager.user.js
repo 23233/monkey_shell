@@ -72,6 +72,7 @@
     function onSet(ck){
         clearCookies(function () {
             setCookies(ck)
+
         })
     }
 
@@ -84,7 +85,7 @@
         cookies.forEach(function (cookie) {
             var parts = cookie.split('=');
             GM_cookie.set({
-                url:"/",
+                url:window.location.href,
                 domain: ".music.163.com",
                 name: parts[0].trim(),
                 value: parts[1].trim()
