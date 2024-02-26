@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         网易云账号管理器
 // @namespace    http://tampermonkey.net/
-// @version      2024-02-26
+// @version      2024-02-26-01
 // @description  记录ck,保存ck
 // @author       23233
 // @match        https://*music.163.com/*
@@ -208,23 +208,6 @@
                 alert("检测到cookie未登录 不能从当前新增")
             }
         })
-    }
-
-    function clearCookies() {
-        GM_cookie.list({}, function (cookies, error) {
-            if (!error) {
-                cookies.forEach(function (cookie) {
-                    GM_cookie.delete({
-                        url: window.location.href,
-                        name: cookie.name
-                    });
-                });
-                Toast("清除cookies成功", 3000)
-            } else {
-                console.warn("GM_cookie不受支持 无法清除httpOnly的key")
-                Toast("当前不支持GM_cookie 无法清除httpOnly的key", 3000)
-            }
-        });
     }
 
     function exitNowCookies() {
