@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         网易云账号管理器
 // @namespace    http://tampermonkey.net/
-// @version      2024-02-22-01
+// @version      2024-02-26
 // @description  记录ck,保存ck
 // @author       23233
 // @match        https://*music.163.com/*
@@ -87,8 +87,8 @@
             GM_cookie.set({
                 url:window.location.href,
                 domain: ".music.163.com",
-                name: parts[0].trim(),
-                value: parts[1].trim()
+                name: parts[0]?.trim(),
+                value: parts[1]?.trim()
             }, function (error) {
                 if (error) {
                     console.warn(error, "GM_cookie不受支持 回退到document.cookie 无法获取到httpOnly的key")
@@ -210,6 +210,28 @@
         })
     }
 
+    function clearCookies() {
+        GM_cookie.list({}, function (cookies, error) {
+            if (!error) {
+                cookies.forEach(function (cookie) {
+                    GM_cookie.delete({
+                        url: window.location.href,
+                        name: cookie.name
+                    });
+                });
+                Toast("清除cookies成功", 3000)
+            } else {
+                console.warn("GM_cookie不受支持 无法清除httpOnly的key")
+                Toast("当前不支持GM_cookie 无法清除httpOnly的key", 3000)
+            }
+        });
+    }
+
+    function exitNowCookies() {
+        clearCookies()
+    }
+
+
 
     function render() {
         const utilities = loadUtilities();
@@ -221,6 +243,7 @@
         <button id="import-utility-btn">导入</button>
         <button id="export-utility-btn">导出</button>
         <button id="now-add-btn">从当前新增</button>
+        <button id="now-exit-btn">退出当前</button>
     `;
 
         // 绑定按钮的点击事件
@@ -228,6 +251,7 @@
         document.querySelector('#import-utility-btn').onclick = importUtilities;
         document.querySelector('#export-utility-btn').onclick = exportUtilities;
         document.querySelector('#now-add-btn').onclick = nowAddUtility;
+        document.querySelector('#now-exit-btn').onclick = exitNowCookies;
 
         // 下面的代码逻辑保持不变，用于加载并显示utility列表
         utilities.forEach(utility => {
