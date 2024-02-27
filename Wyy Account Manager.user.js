@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         网易云账号管理器
 // @namespace    http://tampermonkey.net/
-// @version      2024-02-26-01
+// @version      2024-02-27
 // @description  记录ck,保存ck
 // @author       23233
 // @match        https://*music.163.com/*
@@ -210,6 +210,29 @@
         })
     }
 
+    function uLoginUtility(){
+        const u = prompt('请输入U');
+        if (u){
+
+            clearCookies(function(){
+                GM_cookie.set({
+                    url:window.location.href,
+                    domain: ".music.163.com",
+                    name: "MUSIC_U",
+                    value: u?.trim()
+                }, function (error) {
+                    if (error) {
+                        console.warn(error, "GM_cookie不受支持 回退到document.cookie 无法获取到httpOnly的key")
+                    }
+                });
+                Toast("设置U成功 刷新可看",3000)
+            })
+
+
+        }
+    }
+
+
     function exitNowCookies() {
         clearCookies()
     }
@@ -222,6 +245,7 @@
 
         // 重置面板并重新添加按钮，确保导入、导出按钮也保留
         panel.innerHTML = `
+        <button id="u-login">U</button>
         <button id="add-utility-btn">新增</button>
         <button id="import-utility-btn">导入</button>
         <button id="export-utility-btn">导出</button>
@@ -235,6 +259,7 @@
         document.querySelector('#export-utility-btn').onclick = exportUtilities;
         document.querySelector('#now-add-btn').onclick = nowAddUtility;
         document.querySelector('#now-exit-btn').onclick = exitNowCookies;
+        document.querySelector('#u-login').onclick = uLoginUtility;
 
         // 下面的代码逻辑保持不变，用于加载并显示utility列表
         utilities.forEach(utility => {
