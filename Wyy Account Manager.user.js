@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         网易云账号管理器
 // @namespace    http://tampermonkey.net/
-// @version      2024-02-27
+// @version      2024-03-09
 // @description  记录ck,保存ck
 // @author       23233
 // @match        https://*music.163.com/*
@@ -270,10 +270,10 @@
 
     function createToggleButton() {
         const toggleButton = document.createElement('button');
-        toggleButton.innerText = '账号管理';
+        toggleButton.innerText = '账号';
         toggleButton.style.position = 'fixed';
-        toggleButton.style.right = '20px';
-        toggleButton.style.top = '20px';
+        toggleButton.style.right = '5px';
+        toggleButton.style.top = '10px';
         toggleButton.style.zIndex = '10001'; // 确保按钮在大多数元素之上
         toggleButton.style.backgroundColor = '#FFF'; // 设置一个基本的背景色
         toggleButton.style.color = '#000'; // 设置文字颜色以确保可读性
