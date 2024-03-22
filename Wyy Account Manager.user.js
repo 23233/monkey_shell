@@ -297,36 +297,8 @@
 
     function render() {
         const utilities = globalUtilities;
-        const panel = document.querySelector('.utility-panel');
-
-        // 重置面板并重新添加按钮，确保导入、导出按钮也保留
-        panel.innerHTML = `
-        <div>
-            <button id="add-utility-btn">新增</button>
-            <button id="now-add-btn">从当前新增</button>
-            <button id="now-exit-btn">退出当前</button>
-            <button id="sync-button">同步</button>
-        </div>
-        <div>
-            <input id="remote-address" placeholder="远程地址" value="${storedRemoteAddress}" class="u_input">
-            <input id="device-id" placeholder="设备ID" value="${storedDeviceId}" class="u_input">
-        </div>
-    `;
-        // 给remote-address和device-id输入框增加监听器，以便在更改时更新localStorage
-        document.getElementById('remote-address').addEventListener('change', (e) => {
-            localStorage.setItem(DEFAULT_REMOTE_KEY, e.target.value);
-        });
-
-        document.getElementById('device-id').addEventListener('change', (e) => {
-            localStorage.setItem(DEFAULT_DEVICE_KEY, e.target.value);
-        });
-
-        // 绑定按钮的点击事件
-        document.querySelector('#add-utility-btn').onclick = addAndSyncUtility; // 假设你有一个添加实用程序的函数
-        document.querySelector('#now-add-btn').onclick = nowAddUtility;
-        document.querySelector('#now-exit-btn').onclick = exitNowCookies;
-        document.getElementById('sync-button').onclick = syncUtilities
-
+        const panel = document.querySelector('#u_content_render');
+        panel.innerHTML = ""
 
         // 下面的代码逻辑保持不变，用于加载并显示utility列表
         utilities.forEach(utility => {
@@ -396,8 +368,56 @@
         const panel = document.createElement('div');
         panel.classList.add('utility-panel', 'hidden'); // 初始隐藏面板
         document.body.appendChild(panel);
-        render();
+
+        // 设置面板的内部HTML
+        panel.innerHTML = `
+        <div id="u_fix_bar"></div>
+        <div id="u_content_render"></div>
+    `
+
+        // 创建fixBar并设置其内部HTML
+        const fixBar = document.createElement("div");
+        fixBar.innerHTML = `
+    <div>
+        <button id="add-utility-btn">新增</button>
+        <button id="now-add-btn">从当前新增</button>
+        <button id="now-exit-btn">退出当前</button>
+        <button id="sync-button">同步</button>
+    </div>
+    <div>
+        <input id="remote-address" placeholder="远程地址" value="${storedRemoteAddress}" class="u_input">
+        <input id="device-id" placeholder="设备ID" value="${storedDeviceId}" class="u_input">
+    </div>
+    `
+        document.querySelector('#u_fix_bar').appendChild(fixBar);
+
+        // 使用事件委托处理按钮的点击事件
+        panel.addEventListener('click', function(event) {
+            const target = event.target;
+            if (target.id === 'add-utility-btn') {
+                addAndSyncUtility();
+            } else if (target.id === 'now-add-btn') {
+                nowAddUtility();
+            } else if (target.id === 'now-exit-btn') {
+                exitNowCookies();
+            } else if (target.id === 'sync-button') {
+                syncUtilities();
+            }
+        });
+
+        // 给remote-address和device-id输入框增加监听器，以便在更改时更新localStorage
+        document.getElementById('remote-address').addEventListener('change', (e) => {
+            localStorage.setItem(DEFAULT_REMOTE_KEY, e.target.value);
+        });
+
+        document.getElementById('device-id').addEventListener('change', (e) => {
+            localStorage.setItem(DEFAULT_DEVICE_KEY, e.target.value);
+        });
+
+        syncUtilities()
+
     }
+
 
     // 在样式中增加控制隐藏的样式
     function injectStyles() {
