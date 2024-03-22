@@ -1,18 +1,30 @@
 // ==UserScript==
 // @name         网易云账号管理器
 // @namespace    http://tampermonkey.net/
-// @version      2024-03-09
+// @version      2024-03-22
 // @description  记录ck,保存ck
 // @author       23233
 // @match        https://*music.163.com/*
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=163.com
 // @grant        GM_setClipboard
+// @grant        GM_xmlhttpRequest
 // @grant        GM_cookie
 // ==/UserScript==
 
-(function() {
+(function () {
     'use strict';
-    const storageKey = 'music163_utilities';
+
+    let globalUtilities = [];
+    const DEFAULT_REMOTE_ADDRESS = 'http://127.0.0.1:6562';
+    const DEFAULT_DEVICE_ID = 'dd';
+
+    const DEFAULT_REMOTE_KEY = "__remote-address"
+    const DEFAULT_DEVICE_KEY = "__device-id"
+
+    // 获取存储值或使用默认值
+    const storedRemoteAddress = localStorage.getItem(DEFAULT_REMOTE_KEY) || DEFAULT_REMOTE_ADDRESS;
+    const storedDeviceId = localStorage.getItem(DEFAULT_DEVICE_KEY) || DEFAULT_DEVICE_ID;
+
 
     const Toast = (message, duration) => {
         // Create the toast element
@@ -41,15 +53,6 @@
         });
     };
 
-
-    function loadUtilities() {
-        return JSON.parse(localStorage.getItem(storageKey) || '[]');
-    }
-
-    function saveUtilities(utilities) {
-        localStorage.setItem(storageKey, JSON.stringify(utilities));
-    }
-
     function createUtilityItem(utility) {
         const container = document.createElement('div');
         container.classList.add('utility-item');
@@ -69,7 +72,7 @@
         return container;
     }
 
-    function onSet(ck){
+    function onSet(ck) {
         clearCookies(function () {
             setCookies(ck)
 
@@ -85,7 +88,7 @@
         cookies.forEach(function (cookie) {
             var parts = cookie.split('=');
             GM_cookie.set({
-                url:window.location.href,
+                url: window.location.href,
                 domain: ".music.163.com",
                 name: parts[0]?.trim(),
                 value: parts[1]?.trim()
@@ -97,7 +100,7 @@
                 }
             });
         });
-        Toast("设置cookie成功",3000)
+        Toast("设置cookie成功", 3000)
         return true
     }
 
@@ -134,40 +137,121 @@
         });
     }
 
-    function onCopy(text){
+    function onCopy(text) {
         GM_setClipboard(text)
-        Toast("复制成功",1000)
+        Toast("复制成功", 1000)
     }
 
     function editUtility(utility) {
         const newName = prompt('修改名称', utility.name);
         const newCk = prompt('修改CK', utility.ck);
-        if (newName && newCk) {
-            const utilities = loadUtilities();
-            const index = utilities.findIndex(u => u.name === utility.name && u.ck === utility.ck);
-            utilities[index] = { name: newName, ck: newCk };
-            saveUtilities(utilities);
-            render();
+        const remoteAddress = document.getElementById('remote-address').value;
+        const deviceId = document.getElementById('device-id').value;
+        const url = `${remoteAddress}/remote_cookies/${utility.uid}`; // 注意这里是如何将uid添加到URL中的
+
+        if (newName && newCk && deviceId) {
+            const putData = {
+                cookie: newCk,
+                remark: newName,
+                devices: deviceId
+            };
+
+            GM_xmlhttpRequest({
+                method: "PUT",
+                url: url,
+                data: JSON.stringify(putData),
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                onload: function (response) {
+                    if (response.status >= 200 && response.status < 300) {
+                        // 可在此处加入PUT请求成功后的逻辑，比如提示用户或者更新页面元素等
+                        console.log('编辑成功：', response.responseText);
+                        syncUtilities();
+                    } else {
+                        console.error('编辑失败:', response.statusText, response.responseText);
+                        alert('编辑失败');
+                    }
+                },
+                onerror: function (response) {
+                    console.error('请求失败:', response.statusText, response.responseText);
+                    alert('请求失败');
+                }
+            });
         }
     }
 
     function deleteUtility(utility) {
         if (confirm('是否确认删除？')) {
-            let utilities = loadUtilities();
-            utilities = utilities.filter(u => u.name !== utility.name || u.ck !== utility.ck);
-            saveUtilities(utilities);
-            render();
+            const remoteAddress = document.getElementById('remote-address').value;
+            const url = `${remoteAddress}/remote_cookies/${utility.uid}`; // 组装请求URL，将uid作为参数
+
+            // 发起DELETE请求
+            GM_xmlhttpRequest({
+                method: "DELETE",
+                url: url,
+                onload: function (response) {
+                    if (response.status >= 200 && response.status < 300) {
+                        // 请求成功，可以执行后续的同步操作
+                        console.log('删除成功：', response.responseText);
+                        syncUtilities(); // 删除成功后执行同步操作，更新本地状态
+                    } else {
+                        console.error('删除失败:', response.statusText);
+                        alert('删除失败');
+                    }
+                },
+                onerror: function (response) {
+                    console.error('请求失败:', response.statusText);
+                    alert('请求失败');
+                }
+            });
         }
+
     }
 
-    function addUtility() {
+
+    // 修改后的处理函数，用于添加并同步工具
+    function addAndSyncUtility() {
         const name = prompt('请输入名称');
         const ck = prompt('请输入CK');
-        if (name && ck) {
-            const utilities = loadUtilities();
-            utilities.push({ name, ck });
-            saveUtilities(utilities);
-            render();
+        return addAndSync(name, ck)
+    }
+
+    function addAndSync(name, ck) {
+        const remoteAddress = document.getElementById('remote-address').value;
+        const deviceId = document.getElementById('device-id').value;
+
+        if (name && ck && deviceId) {
+
+            const postData = {
+                cookie: ck,
+                remark: name,
+                devices: deviceId
+            };
+
+            GM_xmlhttpRequest({
+                method: "POST",
+                url: remoteAddress + '/remote_cookies',
+                data: JSON.stringify(postData),
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                onload: function (response) {
+                    if (response.status >= 200 && response.status < 300) {
+                        // Assuming the response is in JSON format
+                        const data = JSON.parse(response.responseText);
+                        // 同步成功后执行一次同步方法，即调用syncUtilities
+                        syncUtilities();
+                    } else {
+                        console.error('新增失败:', response.statusText);
+                        alert('新增失败');
+                    }
+                },
+                onerror: function (response) {
+                    console.error('请求失败:', response.statusText);
+                    alert('请求失败');
+                }
+            });
         }
     }
 
@@ -176,11 +260,11 @@
             let contentIframe = document.getElementById('g_iframe');
             let iframeDoc = contentIframe.contentDocument ? contentIframe.contentDocument : contentIframe.contentWindow.document;
             let targetElement = iframeDoc.querySelector('#j-name-wrap span.tit');
-            if (targetElement){
+            if (targetElement) {
                 return targetElement.innerText
             }
-        }catch (e) {
-            console.error("获取默认用户名失败",e)
+        } catch (e) {
+            console.error("获取默认用户名失败", e)
         }
 
         return ""
@@ -193,43 +277,16 @@
 
     function nowAddUtility() {
         getCookies(function (cookie) {
-            if (containsRequiredSubstrings(cookie)){
+            if (containsRequiredSubstrings(cookie)) {
                 const defaultName = getDefaultUserName()
-                console.log("defaultName",defaultName)
-                const name = prompt('请输入名称',defaultName);
-                const ck = prompt('请输入CK',cookie);
-                if (name && ck) {
-                    const utilities = loadUtilities();
-                    utilities.push({ name, ck });
-                    saveUtilities(utilities);
-                    render();
-                }
-            }else{
+                console.log("defaultName", defaultName)
+                const name = prompt('请输入名称', defaultName);
+                const ck = prompt('请输入CK', cookie);
+                return addAndSync(name, ck)
+            } else {
                 alert("检测到cookie未登录 不能从当前新增")
             }
         })
-    }
-
-    function uLoginUtility(){
-        const u = prompt('请输入U');
-        if (u){
-
-            clearCookies(function(){
-                GM_cookie.set({
-                    url:window.location.href,
-                    domain: ".music.163.com",
-                    name: "MUSIC_U",
-                    value: u?.trim()
-                }, function (error) {
-                    if (error) {
-                        console.warn(error, "GM_cookie不受支持 回退到document.cookie 无法获取到httpOnly的key")
-                    }
-                });
-                Toast("设置U成功 刷新可看",3000)
-            })
-
-
-        }
     }
 
 
@@ -238,28 +295,38 @@
     }
 
 
-
     function render() {
-        const utilities = loadUtilities();
+        const utilities = globalUtilities;
         const panel = document.querySelector('.utility-panel');
 
         // 重置面板并重新添加按钮，确保导入、导出按钮也保留
         panel.innerHTML = `
-        <button id="u-login">U</button>
-        <button id="add-utility-btn">新增</button>
-        <button id="import-utility-btn">导入</button>
-        <button id="export-utility-btn">导出</button>
-        <button id="now-add-btn">从当前新增</button>
-        <button id="now-exit-btn">退出当前</button>
+        <div>
+            <button id="add-utility-btn">新增</button>
+            <button id="now-add-btn">从当前新增</button>
+            <button id="now-exit-btn">退出当前</button>
+            <button id="sync-button">同步</button>
+        </div>
+        <div>
+            <input id="remote-address" placeholder="远程地址" value="${storedRemoteAddress}" class="u_input">
+            <input id="device-id" placeholder="设备ID" value="${storedDeviceId}" class="u_input">
+        </div>
     `;
+        // 给remote-address和device-id输入框增加监听器，以便在更改时更新localStorage
+        document.getElementById('remote-address').addEventListener('change', (e) => {
+            localStorage.setItem(DEFAULT_REMOTE_KEY, e.target.value);
+        });
+
+        document.getElementById('device-id').addEventListener('change', (e) => {
+            localStorage.setItem(DEFAULT_DEVICE_KEY, e.target.value);
+        });
 
         // 绑定按钮的点击事件
-        document.querySelector('#add-utility-btn').onclick = addUtility; // 假设你有一个添加实用程序的函数
-        document.querySelector('#import-utility-btn').onclick = importUtilities;
-        document.querySelector('#export-utility-btn').onclick = exportUtilities;
+        document.querySelector('#add-utility-btn').onclick = addAndSyncUtility; // 假设你有一个添加实用程序的函数
         document.querySelector('#now-add-btn').onclick = nowAddUtility;
         document.querySelector('#now-exit-btn').onclick = exitNowCookies;
-        document.querySelector('#u-login').onclick = uLoginUtility;
+        document.getElementById('sync-button').onclick = syncUtilities
+
 
         // 下面的代码逻辑保持不变，用于加载并显示utility列表
         utilities.forEach(utility => {
@@ -267,6 +334,42 @@
         });
     }
 
+    // 同步按钮点击事件处理函数
+    function syncUtilities() {
+        const remoteAddress = document.getElementById('remote-address').value;
+        const deviceId = document.getElementById('device-id').value;
+        const url = `${remoteAddress}/remote_cookies?devices=${deviceId}`;
+
+        GM_xmlhttpRequest({
+            method: "GET",
+            url: url,
+            onload: function (response) {
+                if (response.status >= 200 && response.status < 300) {
+                    const data = JSON.parse(response.responseText);
+                    if (data && data.data) {
+                        globalUtilities = data.data.map(item => {
+                            const name = item?.remark || item?.nick_name || "";
+                            return {name: name, ck: item.cookie, uid: item.uid};
+                        });
+                        render();
+                        // 重新渲染面板以显示新数据
+                        return
+                    }
+                    globalUtilities = []
+                    render();
+                } else {
+                    console.error('Sync failed:', response.statusText);
+                    alert('同步失败');
+                }
+            },
+            onerror: function (response) {
+                console.error('请求失败:', response.statusText);
+                alert('请求失败');
+            },
+        });
+
+
+    }
 
     function createToggleButton() {
         const toggleButton = document.createElement('button');
@@ -288,20 +391,14 @@
         };
         document.body.appendChild(toggleButton);
     }
+
     function createPanel() {
         const panel = document.createElement('div');
         panel.classList.add('utility-panel', 'hidden'); // 初始隐藏面板
         document.body.appendChild(panel);
-
-        // 初始创建时加入添加按钮
-        const addButton = document.createElement('button');
-        addButton.id = 'add-utility-btn'; // 给添加按钮一个ID
-        addButton.innerText = '新增';
-        addButton.onclick = addUtility;
-        panel.appendChild(addButton);
-
         render();
     }
+
     // 在样式中增加控制隐藏的样式
     function injectStyles() {
         const style = document.createElement('style');
@@ -336,46 +433,20 @@
                 font-size:14px;
 
             }
+            .u_input {
+                padding: 3px;
+                font-size: 12px;
+                margin-top: 5px;
+                display: inline-block;
+                width: 80px;
+            }
             /* Add more styles as needed */
         `;
         document.head.appendChild(style);
     }
+
     // 在函数最后添加以下代码片段
-    function exportUtilities() {
-        const utilities = loadUtilities();
-        const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(utilities));
-        const downloadAnchorNode = document.createElement('a');
-        downloadAnchorNode.setAttribute("href", dataStr);
-        downloadAnchorNode.setAttribute("download", "music163_utilities.json");
-        document.body.appendChild(downloadAnchorNode); // required for firefox
-        downloadAnchorNode.click();
-        downloadAnchorNode.remove();
-    }
 
-    function importUtilities() {
-        const inputFile = document.createElement('input');
-        inputFile.type = 'file';
-        inputFile.accept = '.json';
-
-        inputFile.onchange = e => {
-            const file = e.target.files[0];
-            if (file) {
-                const reader = new FileReader();
-                reader.onload = function(event) {
-                    try {
-                        const utilities = JSON.parse(event.target.result);
-                        saveUtilities(utilities);
-                        render();
-                        alert("导入成功！");
-                    } catch (e) {
-                        alert("导入失败，文件格式错误。");
-                    }
-                };
-                reader.readAsText(file);
-            }
-        };
-        inputFile.click();
-    }
 
     // Main
     function main() {
@@ -386,7 +457,7 @@
     }
 
     // Run script after document is loaded
-    if(document.readyState === "complete" || (document.readyState !== "loading" && !document.documentElement.doScroll)) {
+    if (document.readyState === "complete" || (document.readyState !== "loading" && !document.documentElement.doScroll)) {
         main();
     } else {
         document.addEventListener("DOMContentLoaded", main);
