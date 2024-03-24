@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         网易云音乐实时歌曲趋势播放量统计
 // @namespace    http://tampermonkey.net/
-// @version      0.2
+// @version      0.3
 // @author       23233
 // @description  拦截指定 URL 请求，计算今日和昨日的播放量总和，并在控制台输出结果
 // @match        *://st.music.163.com/*
@@ -15,6 +15,34 @@
     let nowCount = 0
     // 拦截 Fetch API
     var originalFetch = unsafeWindow.fetch;
+
+    const Toast = (message, duration) => {
+        // Create the toast element
+        const toast = document.createElement("div");
+        toast.textContent = message;
+        toast.style.position = "fixed";
+        toast.style.bottom = "20px";
+        toast.style.left = "50%";
+        toast.style.transform = "translateX(-50%)";
+        toast.style.backgroundColor = "black";
+        toast.style.color = "white";
+        toast.style.padding = "10px";
+        toast.style.borderRadius = "5px";
+        toast.style.zIndex = "9999";
+        toast.style.textAlign = "center";
+        document.body.appendChild(toast);
+
+        // Remove the toast after the specified duration
+        setTimeout(function () {
+            toast.parentNode.removeChild(toast);
+        }, duration);
+
+        // Remove the toast when it's clicked
+        toast.addEventListener("click", function () {
+            toast.parentNode.removeChild(toast);
+        });
+    };
+
 
     window.unsafeWindow.fetch = (url, options) => {
         return originalFetch(url, options).then(async (response) => {
@@ -78,6 +106,7 @@
 
         // 输出累加结果
         console.log(`今天的播放总次数: ${todayTotal}`);
+        Toast(`今日${todayTotal} 昨日${yesterdayTotal}`,30 * 1000)
         console.log(`昨天的播放总次数: ${yesterdayTotal}`);
     }
 

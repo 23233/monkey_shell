@@ -18,6 +18,8 @@ jobs:
           cp *.js docs
       - name: Create index.html
         run: |
+          commit_date=$(git log -1 --format=%cd)
+          commit_message=$(git log -1 --format=%B)
           echo "<!DOCTYPE html>" > docs/index.html
           echo "<html>" >> docs/index.html
           echo "<head>" >> docs/index.html
@@ -25,6 +27,9 @@ jobs:
           echo "</head>" >> docs/index.html
           echo "<body>" >> docs/index.html
           echo "    <h1>My Scripts</h1>" >> docs/index.html
+          # 在这里添加新的h2标签
+          echo "    <h2>Last Updated: $commit_date</h2>" >> docs/index.html
+          echo "    <h2>Commit Message: $commit_message</h2>" >> docs/index.html
           echo "    <ul>" >> docs/index.html
           for filename in *.js; do
             echo "        <li><a href=\"$filename\">$filename</a></li>" >> docs/index.html
