@@ -18,7 +18,7 @@ jobs:
           cp *.js docs
       - name: Create index.html
         run: |
-          commit_date=$(git log -1 --format=%cd)
+          commit_date=$(git log -1 --format=%cd --date=format:%Y-%m-%d %H:%M:%S)
           commit_message=$(git log -1 --format=%B)
           echo "<!DOCTYPE html>" > docs/index.html
           echo "<html>" >> docs/index.html
