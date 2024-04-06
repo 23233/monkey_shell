@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         网易云账号管理器
 // @namespace    http://tampermonkey.net/
-// @version      2024-04-06
+// @version      2024-04-06-01
 // @description  记录ck,保存ck
 // @author       23233
 // @match        https://*music.163.com/*
