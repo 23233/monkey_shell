@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         网易云账号管理器
 // @namespace    http://tampermonkey.net/
-// @version      2024-03-22
+// @version      2024-04-06
 // @description  记录ck,保存ck
 // @author       23233
 // @match        https://*music.163.com/*
@@ -57,7 +57,8 @@
         const container = document.createElement('div');
         container.classList.add('utility-item');
         container.innerHTML = `
-            <span>${utility.name}</span>
+            <span class="utility-name">${utility.name}</span>
+            <span>${utility?.is_singer ? "歌手":"非歌手"}</span>
             <button class="edit">修改</button>
             <button class="delete">删除</button>
             <button class="copy">复制</button>
@@ -145,6 +146,7 @@
     function editUtility(utility) {
         const newName = prompt('修改名称', utility.name);
         const newCk = prompt('修改CK', utility.ck);
+        const isSinger = confirm("是否是歌手账号")
         const remoteAddress = document.getElementById('remote-address').value;
         const deviceId = document.getElementById('device-id').value;
         const url = `${remoteAddress}/remote_cookies/${utility.uid}`; // 注意这里是如何将uid添加到URL中的
@@ -153,7 +155,8 @@
             const putData = {
                 cookie: newCk,
                 remark: newName,
-                devices: deviceId
+                devices: deviceId,
+                is_singer:isSinger,
             };
 
             GM_xmlhttpRequest({
@@ -214,10 +217,11 @@
     function addAndSyncUtility() {
         const name = prompt('请输入名称');
         const ck = prompt('请输入CK');
-        return addAndSync(name, ck)
+        const isSinger = confirm("是否是歌手账号")
+        return addAndSync(name, ck,isSinger)
     }
 
-    function addAndSync(name, ck) {
+    function addAndSync(name, ck,isSinger) {
         const remoteAddress = document.getElementById('remote-address').value;
         const deviceId = document.getElementById('device-id').value;
 
@@ -226,7 +230,8 @@
             const postData = {
                 cookie: ck,
                 remark: name,
-                devices: deviceId
+                devices: deviceId,
+                is_singer:isSinger
             };
 
             GM_xmlhttpRequest({
@@ -282,7 +287,8 @@
                 console.log("defaultName", defaultName)
                 const name = prompt('请输入名称', defaultName);
                 const ck = prompt('请输入CK', cookie);
-                return addAndSync(name, ck)
+                const isSinger = confirm("是否是歌手账号")
+                return addAndSync(name, ck,isSinger)
             } else {
                 alert("检测到cookie未登录 不能从当前新增")
             }
@@ -321,7 +327,7 @@
                     if (data && data.data) {
                         globalUtilities = data.data.map(item => {
                             const name = item?.remark || item?.nick_name || "";
-                            return {name: name, ck: item.cookie, uid: item.uid};
+                            return {name: name, ck: item.cookie, uid: item.uid,is_singer:!!item?.is_singer};
                         });
                         render();
                         // 重新渲染面板以显示新数据
@@ -448,10 +454,12 @@
                 margin-bottom:5px;
             }
             .utility-item span {
-                width:100px;
+                min-width:42px;
                 display:inline-block;
                 font-size:14px;
-
+            }
+            .utility-item .utility-name {
+                width:100px;
             }
             .u_input {
                 padding: 3px;
