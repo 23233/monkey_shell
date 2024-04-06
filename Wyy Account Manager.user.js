@@ -9,6 +9,7 @@
 // @grant        GM_setClipboard
 // @grant        GM_xmlhttpRequest
 // @grant        GM_cookie
+// @connect *
 // ==/UserScript==
 
 (function () {
