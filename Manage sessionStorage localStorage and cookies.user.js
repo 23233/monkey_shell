@@ -162,7 +162,8 @@
             GM_cookie.set({
                 url: window.location.href,
                 name: parts[0].trim(),
-                value: parts[1].trim()
+                value: parts[1].trim(),
+                expirationDate:Math.floor(Date.now() / 1000) + (60 * 60 * 24 * 30), // 过期时间30天
             }, function (error) {
                 if (error) {
                     console.warn(error, "GM_cookie不受支持 回退到document.cookie 无法获取到httpOnly的key")
