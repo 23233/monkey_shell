@@ -158,17 +158,27 @@
         }
         var cookies = data.split(';');
         cookies.forEach(function (cookie) {
+
             var parts = cookie.split('=');
+            var domain = window.location.hostname === 'music.163.com' ? ".music.163.com" : window.location.hostname;
+            var name = parts[0] ? parts[0].trim() : null;
+            var value = parts[1] ? parts[1].trim() : null;
+            var expirationDate = null; // 默认不设置过期时间
+            if (window.location.hostname === 'music.163.com') {
+                // 只有当域名是music.163.com时，设置过期时间为35天
+                expirationDate = Math.floor(Date.now() / 1000) + (60 * 60 * 24 * 35);
+            }
             GM_cookie.set({
                 url: window.location.href,
-                name: parts[0].trim(),
-                value: parts[1].trim(),
-                expirationDate:Math.floor(Date.now() / 1000) + (60 * 60 * 24 * 30), // 过期时间30天
+                domain: domain,
+                name: name,
+                value: value,
+                expirationDate: expirationDate, // 过期时间35天
             }, function (error) {
                 if (error) {
                     console.warn(error, "GM_cookie不受支持 回退到document.cookie 无法获取到httpOnly的key")
                     Toast("当前不支持GM_cookie 回退到document.cookie 无法获取到httpOnly的key", 3000)
-                    document.cookie = parts[0] + '=' + parts[1];
+                    document.cookie = name + '=' + value;
                 }
             });
         });
