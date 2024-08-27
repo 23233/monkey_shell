@@ -101,9 +101,12 @@
         const blob = new Blob([exportData], { type: 'text/plain;charset=utf-8' });
         const url = URL.createObjectURL(blob);
 
+        const now_url = new URL(window.location.href).pathname.split("/")
+        const uid = now_url[now_url.length - 1];
+
         const a = document.createElement('a');
         a.href = url;
-        a.download = `user_profile_links_${Date.now()}.txt`;
+        a.download = `user_profile_links_${uid}_${Date.now()}.txt`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
