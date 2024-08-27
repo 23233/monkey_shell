@@ -106,7 +106,7 @@
 
         const a = document.createElement('a');
         a.href = url;
-        a.download = `user_profile_links_${uid}_${Date.now()}.txt`;
+        a.download = `user_profile_links_${uid}_${allProfileLinks.size}_${Date.now()}.txt`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
