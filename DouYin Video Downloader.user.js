@@ -3,7 +3,7 @@
 // @namespace    http://tampermonkey.net/
 // @version      0.1
 // @description  在抖音视频页面添加下载按钮
-// @author       Your name
+// @author       23233
 // @match        https://www.douyin.com/video/*
 // @grant        GM_download
 // @run-at       document-end
@@ -67,9 +67,9 @@
             }
         });
     }
-
     // 等待页面加载完成后添加下载按钮
     window.addEventListener('load', () => {
+        console.log("页面加载完成")
         setTimeout(createDownloadButton, 2000); // 延迟2秒添加按钮，确保视频元素已加载
     });
 })(); 
