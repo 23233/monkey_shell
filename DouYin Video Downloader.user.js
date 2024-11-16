@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         抖音视频下载助手
 // @namespace    http://tampermonkey.net/
-// @version      0.1
+// @version      0.2
 // @description  在抖音视频页面添加下载按钮
 // @author       23233
 // @match        https://www.douyin.com/video/*
