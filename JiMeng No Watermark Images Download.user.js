@@ -1,10 +1,10 @@
 // ==UserScript==
-// @name         即梦图片无水印下载（按天聚合）
+// @name         即梦图片无水印下载（聚合下载版）
 // @namespace    http://tampermonkey.net/
 // @version      2.0
-// @description  按history_group_key聚合，再通过created_time按天聚合，并选择下载
+// @description  按history_group_key聚合，再通过created_time按天聚合，再按分辨率进行聚合，并选择下载
 // @author       23233
-// @match        *://*/*
+// @match        https://jimeng.jianying.com/ai-tool/image/generate
 // @grant        GM_download
 // @run-at       document-start
 // ==/UserScript==
