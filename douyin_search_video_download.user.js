@@ -2,7 +2,7 @@
 // @name         抖音搜索页视频下载
 // @namespace    http://tampermonkey.net/
 // @version      1.0
-// @description  在抖音搜索页面下载视频
+// @description  在抖音搜索页面展示视频并可以下载视频
 // @author       23233
 // @match        https://www.douyin.com/search/*
 // @match        https://www.douyin.com/root/search/*
