@@ -1,18 +1,106 @@
 // ==UserScript==
 // @name         抖音视频下载助手
 // @namespace    http://tampermonkey.net/
-// @version      0.2
+// @version      0.3
 // @description  在抖音视频页面添加下载按钮
 // @author       23233
 // @match        https://www.douyin.com/video/*
 // @grant        GM_download
 // @grant        GM_xmlhttpRequest
 // @connect      *
-// @run-at       document-end
+// @run-at       document-start
 // ==/UserScript==
 
 (function() {
     'use strict';
+
+    // 添加视频URL存储
+    let videoUrlFromApi = null;
+
+    // 立即执行请求拦截
+    console.log("开始执行请求拦截");
+    interceptApiRequest();
+
+    // 添加请求拦截逻辑
+    function interceptApiRequest() {
+        const originalXHR = unsafeWindow.XMLHttpRequest;
+        
+        unsafeWindow.XMLHttpRequest = new Proxy(originalXHR, {
+            construct: function(target, args) {
+                const xhr = new target(...args);
+                
+                // 代理 open 方法
+                const originalOpen = xhr.open;
+                xhr.open = function() {
+                    if (arguments[1].includes('/aweme/v1/web/aweme/detail')) {
+                        console.log('检测到XHR目标请求:', arguments[1]);
+                        
+                        // 保存原始的 onreadystatechange
+                        const originalStateChange = xhr.onreadystatechange;
+                        xhr.onreadystatechange = function() {
+                            // 先调用原始的回调
+                            if (originalStateChange) {
+                                originalStateChange.apply(this, arguments);
+                            }
+                            
+                            if (xhr.readyState === 4 && xhr.status === 200) {
+                                // console.log('响应内容:', xhr.responseText);
+                                try {
+                                    const response = JSON.parse(xhr.responseText);
+                                    handleApiResponse(response);
+                                } catch (error) {
+                                    console.error('解析XHR响应失败:', error);
+                                }
+                            }
+                        };
+                    }
+                    return originalOpen.apply(xhr, arguments);
+                };
+                
+                return xhr;
+            }
+        });
+
+        // 拦截 fetch 请求
+        const originalFetch = unsafeWindow.fetch;
+        unsafeWindow.fetch = function(input, init) {
+            const url = typeof input === 'string' ? input : input.url;
+            
+            if (url.includes('/aweme/v1/web/aweme/detail')) {
+                console.log('检测到fetch目标请求:', url);
+                
+                return originalFetch.apply(this, arguments)
+                    .then(response => response.clone().json()
+                        .then(data => {
+                            handleApiResponse(data);
+                            return response;
+                        })
+                        .catch(error => {
+                            console.error('解析fetch响应失败:', error);
+                            return response;
+                        })
+                    );
+            }
+            
+            return originalFetch.apply(this, arguments);
+        };
+
+        // 统一处理响应数据
+        function handleApiResponse(response) {
+            try {
+                const urlList = response?.aweme_detail?.video?.play_addr?.url_list;
+                if (urlList && Array.isArray(urlList)) {
+                    const playUrl = urlList.find(url => url.includes('/aweme/v1/play/'));
+                    if (playUrl) {
+                        videoUrlFromApi = playUrl;
+                        console.log('已获取到视频URL:', videoUrlFromApi);
+                    }
+                }
+            } catch (error) {
+                console.error('处理响应数据失败:', error);
+            }
+        }
+    }
 
     // 创建下载按钮
     function createDownloadButton() {
@@ -83,44 +171,61 @@
 
     // 修改下载视频函数
     function downloadVideo() {
-        const videoElement = document.querySelector('video[data-xgplayerid]');
-        
-        if (!videoElement) {
-            alert('未找到视频元素');
-            return;
-        }
+        if (videoUrlFromApi) {
+            console.log('使用API获取的URL下载视频:', videoUrlFromApi);
+            const videoId = window.location.pathname.split('/').pop().split('?')[0];
+            const fileName = `${videoId}.mp4`;
+            
+            tryGMDownload(videoUrlFromApi, fileName)
+                .catch((error) => {
+                    console.log('GM_download 失败，错误:', error);
+                    return tryXHRDownload(videoUrlFromApi, fileName);
+                })
+                .catch((error) => {
+                    console.log('GM_xmlhttpRequest 失败，错误:', error);
+                    return copyToClipboardAndNotify(videoUrlFromApi);
+                });
+        } else {
+            // 如果没有从API获取到URL，使用原来的逻辑
+            const videoElement = document.querySelector('video[data-xgplayerid]');
+            
+            if (!videoElement) {
+                alert('未找到视频元素');
+                return;
+            }
 
-        const sources = videoElement.getElementsByTagName('source');
-        const lastSource = sources[sources.length - 1];
-        
-        if (!lastSource || !lastSource.src) {
-            alert('未找到视频源');
-            return;
-        }
+            const sources = videoElement.getElementsByTagName('source');
+            const lastSource = sources[sources.length - 1];
+            
+            if (!lastSource || !lastSource.src) {
+                alert('未找到视频源');
+                return;
+            }
 
-        const videoId = window.location.pathname.split('/').pop().split('?')[0];
-        const fileName = `${videoId}.mp4`;
-        const videoUrl = lastSource.src;
+            const videoId = window.location.pathname.split('/').pop().split('?')[0];
+            const fileName = `${videoId}.mp4`;
+            const videoUrl = lastSource.src;
 
-        console.log('开始下载视频:', {
-            url: videoUrl,
-            fileName: fileName,
-            GM_download: typeof GM_download,
-            GM_xmlhttpRequest: typeof GM_xmlhttpRequest
-        });
-
-        // 尝试使用 GM_download
-        tryGMDownload(videoUrl, fileName)
-            .catch((error) => {
-                console.log('GM_download 失败，错误:', error);
-                console.log('尝试使用 GM_xmlhttpRequest');
-                return tryXHRDownload(videoUrl, fileName);
-            })
-            .catch((error) => {
-                console.log('GM_xmlhttpRequest 失败，错误:', error);
-                console.log('复制链接到剪贴板');
-                return copyToClipboardAndNotify(videoUrl);
+            console.log('开始下载视频:', {
+                url: videoUrl,
+                fileName: fileName,
+                GM_download: typeof GM_download,
+                GM_xmlhttpRequest: typeof GM_xmlhttpRequest
             });
+
+            // 尝试使用 GM_download
+            tryGMDownload(videoUrl, fileName)
+                .catch((error) => {
+                    console.log('GM_download 失败，错误:', error);
+                    console.log('尝试使用 GM_xmlhttpRequest');
+                    return tryXHRDownload(videoUrl, fileName);
+                })
+                .catch((error) => {
+                    console.log('GM_xmlhttpRequest 失败，错误:', error);
+                    console.log('复制链接到剪贴板');
+                    return copyToClipboardAndNotify(videoUrl);
+                });
+        }
     }
 
     // 创建进度条UI
