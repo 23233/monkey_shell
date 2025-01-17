@@ -247,16 +247,47 @@
         menu.style.display = 'block';
     };
 
-    // 下载图片
+    // 通用的图片格式转换方法
+    const convertWebpToPng = (imageUrl) => {
+        return new Promise((resolve, reject) => {
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            const tempImg = new Image();
+            
+            tempImg.crossOrigin = 'anonymous';
+            tempImg.onload = () => {
+                canvas.width = tempImg.width;
+                canvas.height = tempImg.height;
+                ctx.drawImage(tempImg, 0, 0);
+                
+                canvas.toBlob((blob) => {
+                    const url = URL.createObjectURL(blob);
+                    resolve(url);
+                }, 'image/png');
+            };
+            
+            tempImg.onerror = reject;
+            tempImg.src = imageUrl;
+        });
+    };
+
+    // 修改下载图片方法
     const downloadImages = (groupKey, date, resolution) => {
         const images = groupedData[groupKey][date][resolution] || [];
-        images.forEach(({ coverUrl, coverUri }) => {
-            const filename = `${date}_${resolution}_${coverUri}.webp`;
-            GM_download({
-                url: coverUrl,
-                name: filename,
-                onerror: (error) => console.error(`Failed to download ${filename}:`, error),
-            });
+        images.forEach(async ({ coverUrl, coverUri }, index) => {
+            try {
+                const pngUrl = await convertWebpToPng(coverUrl);
+                const filename = `${groupKey}_${date}_${resolution}_${index + 1}.png`;
+                
+                GM_download({
+                    url: pngUrl,
+                    name: filename,
+                    onerror: (error) => console.error(`Failed to download ${filename}:`, error),
+                    onload: () => URL.revokeObjectURL(pngUrl)
+                });
+            } catch (error) {
+                console.error('Error converting image:', error);
+            }
         });
     };
 
@@ -281,6 +312,82 @@
         document.body.appendChild(button);
     };
 
+    // 创建当前图片下载按钮
+    const createCurrentImageButton = () => {
+        const button = document.createElement('button');
+        button.id = 'downloadCurrentImageButton';
+        button.textContent = '下载当前图片';
+        button.style.position = 'fixed';
+        button.style.right = '20px';
+        button.style.bottom = '50px';
+        button.style.zIndex = '9999';
+        button.style.padding = '10px 20px';
+        button.style.backgroundColor = '#2196F3';
+        button.style.color = '#fff';
+        button.style.border = 'none';
+        button.style.borderRadius = '5px';
+        button.style.cursor = 'pointer';
+        button.style.fontSize = '14px';
+        button.style.display = 'none'; // 默认隐藏
+
+        button.onclick = downloadCurrentImage;
+        document.body.appendChild(button);
+    };
+
+    // 修改下载当前图片方法，使用新的转换函数
+    const downloadCurrentImage = async () => {
+        const img = document.querySelector('img[data-apm-action="record-detail-image-detail-image-container"]');
+        if (img && img.src) {
+            try {
+                const pngUrl = await convertWebpToPng(img.src);
+                const timestamp = Date.now();
+                const filename = `${timestamp}.png`;
+                
+                GM_download({
+                    url: pngUrl,
+                    name: filename,
+                    onerror: (error) => console.error(`Failed to download ${filename}:`, error),
+                    onload: () => URL.revokeObjectURL(pngUrl)
+                });
+            } catch (error) {
+                console.error('Error converting current image:', error);
+            }
+        }
+    };
+
+    // 监听DOM变化
+    const observeDOM = () => {
+        const targetNode = document.body;
+        const config = { childList: true, subtree: true };
+
+        const callback = (mutationsList) => {
+            for (const mutation of mutationsList) {
+                if (mutation.type === 'childList') {
+                    // 查找所有元素节点，检查是否有包含"再次生成"文字的节点
+                    const elements = document.getElementsByTagName('*');
+                    const currentImageButton = document.getElementById('downloadCurrentImageButton');
+                    
+                    for (const element of elements) {
+                        if (element.childNodes.length === 1 && 
+                            element.firstChild.nodeType === Node.TEXT_NODE && 
+                            element.firstChild.textContent === '再次生成') {
+                            currentImageButton.style.display = 'block';
+                            return;
+                        }
+                    }
+                    
+                    // 如果没找到包含"再次生成"的节点，隐藏按钮
+                    if (currentImageButton) {
+                        currentImageButton.style.display = 'none';
+                    }
+                }
+            }
+        };
+
+        const observer = new MutationObserver(callback);
+        observer.observe(targetNode, config);
+    };
+
     // 确保文档加载完成
     const ensureDocumentReady = (callback) => {
         if (document.readyState === 'loading') {
@@ -297,6 +404,8 @@
         ensureDocumentReady(() => {
             createDownloadButton();
             createSelectionMenu();
+            createCurrentImageButton(); // 添加当前图片下载按钮
+            observeDOM(); // 添加DOM监听
         });
     };
 
