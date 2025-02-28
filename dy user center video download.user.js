@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         抖音主页视频下载
 // @namespace    http://tampermonkey.net/
-// @version      1.8
+// @version      1.9
 // @description  拦截请求并下载抖音视频，显示界面选择下载
 // @author       23233
 // @match        https://www.douyin.com/user/*
@@ -314,8 +314,7 @@
                         let videoUrl = aweme.video.play_addr.url_list[0];
                         let title = aweme.preview_title || aweme.desc;
                         const prefix = aweme.mix_info?.statis?.current?.episode ? `第${aweme.mix_info?.statis?.current?.episode}集：` : ''
-                        // 加上前缀，去掉所有的空白字符
-                        title = (prefix + title).replace(/\s/g, '');
+                        title = (prefix + title);
                         if (videoUrl) {
                             insertVideoInfo(title, videoUrl);
                         }
