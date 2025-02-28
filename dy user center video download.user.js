@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         抖音主页视频下载
 // @namespace    http://tampermonkey.net/
-// @version      1.8
+// @version      1.9
 // @description  拦截请求并下载抖音视频，显示界面选择下载
 // @author       23233
 // @match        https://www.douyin.com/user/*
