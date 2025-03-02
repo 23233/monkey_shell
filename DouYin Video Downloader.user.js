@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         抖音视频下载助手
 // @namespace    http://tampermonkey.net/
-// @version      0.3
+// @version      0.4
 // @description  在抖音视频页面添加下载按钮
 // @author       23233
 // @match        https://www.douyin.com/video/*
@@ -24,17 +24,17 @@
     // 添加请求拦截逻辑
     function interceptApiRequest() {
         const originalXHR = unsafeWindow.XMLHttpRequest;
-        
+
         unsafeWindow.XMLHttpRequest = new Proxy(originalXHR, {
             construct: function(target, args) {
                 const xhr = new target(...args);
-                
+
                 // 代理 open 方法
                 const originalOpen = xhr.open;
                 xhr.open = function() {
                     if (arguments[1].includes('/aweme/v1/web/aweme/detail')) {
                         console.log('检测到XHR目标请求:', arguments[1]);
-                        
+
                         // 保存原始的 onreadystatechange
                         const originalStateChange = xhr.onreadystatechange;
                         xhr.onreadystatechange = function() {
@@ -42,7 +42,7 @@
                             if (originalStateChange) {
                                 originalStateChange.apply(this, arguments);
                             }
-                            
+
                             if (xhr.readyState === 4 && xhr.status === 200) {
                                 // console.log('响应内容:', xhr.responseText);
                                 try {
@@ -56,7 +56,7 @@
                     }
                     return originalOpen.apply(xhr, arguments);
                 };
-                
+
                 return xhr;
             }
         });
@@ -65,10 +65,10 @@
         const originalFetch = unsafeWindow.fetch;
         unsafeWindow.fetch = function(input, init) {
             const url = typeof input === 'string' ? input : input.url;
-            
+
             if (url.includes('/aweme/v1/web/aweme/detail')) {
                 console.log('检测到fetch目标请求:', url);
-                
+
                 return originalFetch.apply(this, arguments)
                     .then(response => response.clone().json()
                         .then(data => {
@@ -81,7 +81,7 @@
                         })
                     );
             }
-            
+
             return originalFetch.apply(this, arguments);
         };
 
@@ -120,7 +120,7 @@
             font-size: 14px;
             box-shadow: 0 2px 8px rgba(0,0,0,0.2);
         `;
-        
+
         button.addEventListener('click', downloadVideo);
         document.body.appendChild(button);
     }
@@ -143,7 +143,7 @@
             font-size: 14px;
             box-shadow: 0 2px 8px rgba(0,0,0,0.2);
         `;
-        
+
         button.addEventListener('click', copyVideoUrl);
         document.body.appendChild(button);
     }
@@ -158,7 +158,7 @@
 
         const sources = videoElement.getElementsByTagName('source');
         const lastSource = sources[sources.length - 1];
-        
+
         if (!lastSource || !lastSource.src) {
             alert('未找到视频源');
             return;
@@ -174,8 +174,8 @@
         if (videoUrlFromApi) {
             console.log('使用API获取的URL下载视频:', videoUrlFromApi);
             const videoId = window.location.pathname.split('/').pop().split('?')[0];
-            const fileName = `${videoId}.mp4`;
-            
+            const fileName = `${videoId}${document.getElementsByTagName("h1")?.[0]?.textContent}.mp4`;
+
             tryGMDownload(videoUrlFromApi, fileName)
                 .catch((error) => {
                     console.log('GM_download 失败，错误:', error);
@@ -188,7 +188,7 @@
         } else {
             // 如果没有从API获取到URL，使用原来的逻辑
             const videoElement = document.querySelector('video[data-xgplayerid]');
-            
+
             if (!videoElement) {
                 alert('未找到视频元素');
                 return;
@@ -196,14 +196,14 @@
 
             const sources = videoElement.getElementsByTagName('source');
             const lastSource = sources[sources.length - 1];
-            
+
             if (!lastSource || !lastSource.src) {
                 alert('未找到视频源');
                 return;
             }
 
             const videoId = window.location.pathname.split('/').pop().split('?')[0];
-            const fileName = `${videoId}.mp4`;
+            const fileName = `${videoId}${document.getElementsByTagName("h1")?.[0]?.textContent}.mp4`;
             const videoUrl = lastSource.src;
 
             console.log('开始下载视频:', {
@@ -433,7 +433,7 @@
             return div;
         })();
         statusDiv.textContent = message;
-        
+
         // 5秒后自动隐藏
         setTimeout(() => {
             statusDiv.style.display = 'none';
