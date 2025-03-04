@@ -81,7 +81,8 @@
         panelContainer.appendChild(panel);
 
         const toggleButton = document.createElement("button");
-        toggleButton.innerHTML = "展开";
+        toggleButton.id = "dy_video_download_toggle_btn";
+        toggleButton.innerHTML = "展开 (0)";
         toggleButton.style.margin = "10px";
         toggleButton.style.position = "fixed";
         toggleButton.style.bottom = "10px";
@@ -98,7 +99,7 @@
             const isHidden = panel.style.display === "none";
             panel.style.display = isHidden ? "block" : "none";
             panelContainer.style.display = isHidden ? "block" : "none";
-            toggleButton.innerHTML = isHidden ? "收起" : "展开";
+            updateToggleButtonText();
         });
 
         const buttonContainer = document.createElement("div");
@@ -110,45 +111,46 @@
         buttonContainer.style.width = "330px";
         buttonContainer.style.display = "flex";
         buttonContainer.style.justifyContent = "space-between";
-        buttonContainer.style.padding = "5px";
+        buttonContainer.style.padding = "3px";
         buttonContainer.style.borderTop = "1px solid #ccc";
+
+        // 修改按钮样式
+        const buttonStyles = {
+            flex: "1",
+            marginRight: "3px",
+            marginLeft: "3px",
+            color: "white",
+            border: "none",
+            borderRadius: "3px",
+            padding: "5px",
+            cursor: "pointer",
+            fontSize: "12px"
+        };
+
+        // 添加复制信息按钮
+        const copyInfoButton = document.createElement("button");
+        copyInfoButton.innerHTML = "复制信息";
+        Object.assign(copyInfoButton.style, buttonStyles);
+        copyInfoButton.style.backgroundColor = "#17a2b8";
+        copyInfoButton.addEventListener("click", copyUserInfo);
 
         const downloadAllButton = document.createElement("button");
         downloadAllButton.innerHTML = "下载全部";
-        downloadAllButton.style.flex = "1";
-        downloadAllButton.style.marginRight = "5px";
+        Object.assign(downloadAllButton.style, buttonStyles);
         downloadAllButton.style.backgroundColor = "#28a745";
-        downloadAllButton.style.color = "white";
-        downloadAllButton.style.border = "none";
-        downloadAllButton.style.borderRadius = "5px";
-        downloadAllButton.style.padding = "10px";
-        downloadAllButton.style.cursor = "pointer";
         downloadAllButton.addEventListener("click", downloadAll);
 
         const downloadSelectedButton = document.createElement("button");
         downloadSelectedButton.innerHTML = "下载选中";
-        downloadSelectedButton.style.flex = "1";
-        downloadSelectedButton.style.marginLeft = "5px";
+        Object.assign(downloadSelectedButton.style, buttonStyles);
         downloadSelectedButton.style.backgroundColor = "#ffc107";
-        downloadSelectedButton.style.color = "white";
-        downloadSelectedButton.style.border = "none";
-        downloadSelectedButton.style.borderRadius = "5px";
-        downloadSelectedButton.style.padding = "10px";
-        downloadSelectedButton.style.cursor = "pointer";
         downloadSelectedButton.addEventListener("click", downloadSelected);
-
 
         // 清空全部
         const clearAllButton = document.createElement("button");
         clearAllButton.innerHTML = "清空全部";
-        clearAllButton.style.flex = "1";
-        clearAllButton.style.marginLeft = "5px";
+        Object.assign(clearAllButton.style, buttonStyles);
         clearAllButton.style.backgroundColor = "#dc3545";
-        clearAllButton.style.color = "white";
-        clearAllButton.style.border = "none";
-        clearAllButton.style.borderRadius = "5px";
-        clearAllButton.style.padding = "10px";
-        clearAllButton.style.cursor = "pointer";
         clearAllButton.addEventListener("click", () => {
             videoList = [];
             panel.innerHTML = "";
@@ -158,14 +160,8 @@
         // 清空选中
         const clearSelectedButton = document.createElement("button");
         clearSelectedButton.innerHTML = "清空选中";
-        clearSelectedButton.style.flex = "1";
-        clearSelectedButton.style.marginLeft = "5px";
+        Object.assign(clearSelectedButton.style, buttonStyles);
         clearSelectedButton.style.backgroundColor = "#f15050";
-        clearSelectedButton.style.color = "white";
-        clearSelectedButton.style.border = "none";
-        clearSelectedButton.style.borderRadius = "5px";
-        clearSelectedButton.style.padding = "10px";
-        clearSelectedButton.style.cursor = "pointer";
         clearSelectedButton.addEventListener("click", () => {
             videoList = videoList.filter(video => !video.checkbox.checked);
             panel.innerHTML = "";
@@ -178,6 +174,7 @@
             });
         });
 
+        buttonContainer.appendChild(copyInfoButton);
         buttonContainer.appendChild(downloadAllButton);
         buttonContainer.appendChild(downloadSelectedButton);
         buttonContainer.appendChild(clearAllButton);
@@ -224,6 +221,7 @@
         panel.appendChild(container);
 
         videoList.push({checkbox, title: title, url, id: url.split('/')[4]});
+        updateToggleButtonText();
     }
 
     // 下载所有视频
@@ -310,9 +308,7 @@
         completeDownload(video) {
             this.currentDownloads--;
             this.downloading.delete(video.url);
-            // 从videoList中移除已下载的视频
             videoList = videoList.filter(v => v.url !== video.url);
-            // 更新面板显示
             const panel = document.getElementById("controlPanel");
             if (panel) {
                 const videoElement = Array.from(panel.children).find(
@@ -322,6 +318,7 @@
                     panel.removeChild(videoElement);
                 }
             }
+            updateToggleButtonText();
             this.processQueue();
         }
     }
@@ -480,5 +477,56 @@
     });
 
     observer.observe(document.body, {childList: true, subtree: true});
+
+    // 更新展开按钮文本
+    function updateToggleButtonText() {
+        const toggleButton = document.querySelector("#dy_video_download_toggle_btn");
+        if (toggleButton) {
+            const panel = document.getElementById("controlPanel");
+            const isHidden = panel.style.display === "none";
+            toggleButton.innerHTML = `${isHidden ? "展开" : "收起"} (${videoList.length})`;
+        }
+    }
+
+    // 复制用户信息函数
+    function copyUserInfo() {
+        try {
+            // 获取用户名（h1标签）
+            const userName = document.querySelector('h1')?.innerText?.trim() || '';
+            
+            // 获取抖音号
+            // 使用属性选择器查找包含"抖音号："文本的span
+            const spans = Array.from(document.getElementsByTagName('span'));
+            const douyinIdSpan = spans.find(span => span.textContent?.includes('抖音号：'));
+            const douyinId = douyinIdSpan ? douyinIdSpan.textContent.replace('抖音号：', '').trim() : '';
+
+            // 组合信息
+            const info = `${userName} ${douyinId}`;
+            
+            // 复制到剪贴板
+            navigator.clipboard.writeText(info).then(() => {
+                showToast("用户信息已复制到剪贴板");
+            }).catch(err => {
+                console.error('复制失败:', err);
+                showToast("复制失败，请手动复制");
+                
+                // 创建临时输入框作为后备方案
+                const textarea = document.createElement('textarea');
+                textarea.value = info;
+                document.body.appendChild(textarea);
+                textarea.select();
+                try {
+                    document.execCommand('copy');
+                    showToast("用户信息已复制到剪贴板");
+                } catch (e) {
+                    showToast("复制失败，请手动复制");
+                }
+                document.body.removeChild(textarea);
+            });
+        } catch (error) {
+            console.error('获取信息失败:', error);
+            showToast("获取用户信息失败");
+        }
+    }
 
 })();
