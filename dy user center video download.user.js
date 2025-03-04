@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         抖音主页视频下载
 // @namespace    http://tampermonkey.net/
-// @version      1.9
+// @version      2.0
 // @description  拦截请求并下载抖音视频，显示界面选择下载
 // @author       23233
 // @match        https://www.douyin.com/user/*
@@ -240,38 +240,107 @@
         });
     }
 
-    // 使用 XMLHttpRequest 下载视频
+    // 下载队列管理器
+    class DownloadQueue {
+        constructor(maxConcurrent = 5) {
+            this.maxConcurrent = maxConcurrent;
+            this.currentDownloads = 0;
+            this.queue = [];
+            this.downloading = new Set();
+        }
+
+        // 添加下载任务到队列
+        add(video) {
+            this.queue.push(video);
+            this.processQueue();
+        }
+
+        // 处理队列
+        processQueue() {
+            if (this.currentDownloads >= this.maxConcurrent || this.queue.length === 0) {
+                return;
+            }
+
+            while (this.currentDownloads < this.maxConcurrent && this.queue.length > 0) {
+                const video = this.queue.shift();
+                this.startDownload(video);
+            }
+        }
+
+        // 开始下载任务
+        startDownload(video) {
+            this.currentDownloads++;
+            this.downloading.add(video.url);
+
+            // 使用 XMLHttpRequest 下载视频
+            const xhr = new XMLHttpRequest();
+            xhr.open("GET", video.url, true);
+            xhr.responseType = "blob";
+            
+            xhr.onload = () => {
+                if (xhr.status === 200) {
+                    const blob = xhr.response;
+                    const downloadUrl = window.URL.createObjectURL(blob);
+                    const a = document.createElement("a");
+                    a.style.display = "none";
+                    a.href = downloadUrl;
+                    a.download = video.title + ".mp4";
+                    document.body.appendChild(a);
+                    a.click();
+                    window.URL.revokeObjectURL(downloadUrl);
+                    showToast(`${video.title} 下载完成`);
+                } else {
+                    showToast(`${video.title} 下载失败`);
+                    console.error("Download error:", xhr.statusText);
+                }
+                this.completeDownload(video);
+            };
+
+            xhr.onerror = () => {
+                showToast(`${video.title} 下载失败`);
+                console.error("Download error:", xhr.statusText);
+                this.completeDownload(video);
+            };
+
+            xhr.send();
+            showToast(`开始下载: ${video.title}`);
+        }
+
+        // 完成下载任务
+        completeDownload(video) {
+            this.currentDownloads--;
+            this.downloading.delete(video.url);
+            // 从videoList中移除已下载的视频
+            videoList = videoList.filter(v => v.url !== video.url);
+            // 更新面板显示
+            const panel = document.getElementById("controlPanel");
+            if (panel) {
+                const videoElement = Array.from(panel.children).find(
+                    el => el.querySelector('a')?.href === video.url
+                );
+                if (videoElement) {
+                    panel.removeChild(videoElement);
+                }
+            }
+            this.processQueue();
+        }
+    }
+
+    // 创建下载队列实例
+    const downloadQueue = new DownloadQueue(5);
+
+    // 修改下载视频函数
     function downloadVideo(title, url) {
-        // 下载一个就将数据删除
-        videoList = videoList.filter(video => video.url !== url);
         // 确保 URL 使用 HTTPS
         if (!url.startsWith('https://')) {
             url = url.replace('http://', 'https://');
         }
-        const xhr = new XMLHttpRequest();
-        xhr.open("GET", url, true);
-        xhr.responseType = "blob";
-        xhr.onload = function () {
-            if (xhr.status === 200) {
-                const blob = xhr.response;
-                const downloadUrl = window.URL.createObjectURL(blob);
-                const a = document.createElement("a");
-                a.style.display = "none";
-                a.href = downloadUrl;
-                a.download = title + ".mp4";
-                document.body.appendChild(a);
-                a.click();
-                window.URL.revokeObjectURL(downloadUrl);
-                console.log("Download completed");
-                showToast("下载完成");
-            } else {
-                console.error("Download error:", xhr.statusText);
-            }
-        };
-        xhr.onerror = function () {
-            console.error("Download error:", xhr.statusText);
-        };
-        xhr.send();
+        // 如果视频已在下载队列中，则跳过
+        if (downloadQueue.downloading.has(url)) {
+            showToast("该视频已在下载队列中");
+            return;
+        }
+        downloadQueue.add({title, url});
     }
 
     // 保存原始的 XMLHttpRequest
