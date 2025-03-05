@@ -1,10 +1,11 @@
 // ==UserScript==
-// @name         即梦图片无水印下载（聚合下载版）
+// @name         即梦图片视频无水印下载（聚合下载版）
 // @namespace    http://tampermonkey.net/
-// @version      2.0
+// @version      2.1
 // @description  按history_group_key聚合，再通过created_time按天聚合，再按分辨率进行聚合，并选择下载
 // @author       23233
 // @match        https://jimeng.jianying.com/ai-tool/image/generate
+// @match        https://jimeng.jianying.com/ai-tool/video/generate
 // @grant        GM_download
 // @run-at       document-start
 // ==/UserScript==
@@ -50,53 +51,61 @@
                 task = response.data[firstKey]?.task;
             } else if (type === 'get_history') {
                 records = response.data?.records_list || [];
-
             }
 
             records.forEach(item => {
-                const {common_attr,item_list } = item;
-                if (!common_attr && !item_list )return;
+                const {common_attr, item_list} = item;
+                if (!common_attr && !item_list) return;
 
-                let { history_group_key, created_time } = item
-
+                let {history_group_key, created_time, generate_type} = item;
+                generate_type = generate_type || (task?.first_generate_type || 1);
 
                 // 如果item_list存在，则遍历item_list
                 const itemsToProcess = item_list && Array.isArray(item_list) ? item_list : [common_attr];
 
                 itemsToProcess.forEach(commonAttrItem => {
                     if (!commonAttrItem) return;
-                    const {common_attr} = commonAttrItem
+                    const {common_attr} = commonAttrItem;
 
                     let width = 0;
                     let height = 0;
-                    if (commonAttrItem?.aigc_image_params){
-                        width = commonAttrItem?.aigc_image_params?.text2image_params?.large_image_info?.width;
-                        height = commonAttrItem?.aigc_image_params?.text2image_params?.large_image_info?.height;
-                    }else if(task?.aigc_image_params){
-                        width = task?.aigc_image_params?.text2image_params?.large_image_info?.width;
-                        height = task?.aigc_image_params?.text2image_params?.large_image_info?.height;
+                    let videoUrl = '';
+                    
+                    if (generate_type === 10) { // 视频类型
+                        const video = commonAttrItem?.video || common_attr?.video;
+                        if (video?.transcoded_video?.origin?.video_url) {
+                            videoUrl = video.transcoded_video.origin.video_url;
+                            width = video.transcoded_video.origin.width;
+                            height = video.transcoded_video.origin.height;
+                        }
+                    } else { // 图片类型
+                        if (commonAttrItem?.aigc_image_params) {
+                            width = commonAttrItem?.aigc_image_params?.text2image_params?.large_image_info?.width;
+                            height = commonAttrItem?.aigc_image_params?.text2image_params?.large_image_info?.height;
+                        } else if (task?.aigc_image_params) {
+                            width = task?.aigc_image_params?.text2image_params?.large_image_info?.width;
+                            height = task?.aigc_image_params?.text2image_params?.large_image_info?.height;
+                        }
                     }
 
-                    if(!history_group_key){
+                    if (!history_group_key) {
                         history_group_key = commonAttrItem?.history_group_key || commonAttrItem?.description;
                     }
-                    if (!created_time){
+                    if (!created_time) {
                         created_time = commonAttrItem?.created_time || commonAttrItem?.create_time;
                     }
 
                     let cover_url;
                     let cover_uri;
-                    if (common_attr){
+                    if (common_attr) {
                         cover_url = common_attr?.cover_url;
                         cover_uri = common_attr?.cover_uri;
-                    }else{
+                    } else {
                         cover_url = commonAttrItem?.cover_url;
                         cover_uri = commonAttrItem?.cover_uri;
                     }
 
-
-
-                    if (!cover_url || !cover_uri) return;
+                    if ((!cover_url && !videoUrl) || (!cover_uri && !videoUrl)) return;
 
                     // 转换时间戳为日期格式
                     const date = new Date(Math.floor(created_time) * 1000).toISOString().split('T')[0];
@@ -118,8 +127,10 @@
                     groupedData[history_group_key][date][resolutionKey].push({
                         coverUrl: cover_url,
                         coverUri: cover_uri,
+                        videoUrl: videoUrl,
                         width: width,
                         height: height,
+                        type: generate_type === 10 ? 'video' : 'image'
                     });
                 });
             });
@@ -145,14 +156,59 @@
         menu.style.position = 'fixed';
         menu.style.right = '20px';
         menu.style.bottom = '80px';
-        menu.style.zIndex = '9999';
         menu.style.backgroundColor = '#fff';
         menu.style.border = '1px solid #ccc';
         menu.style.borderRadius = '5px';
         menu.style.padding = '10px';
-        menu.style.maxHeight = '300px';
-        menu.style.overflowY = 'auto';
         menu.style.display = 'none';
+        menu.style.maxHeight = '400px';
+        menu.style.overflowY = 'auto';
+        menu.style.zIndex = '9998';
+
+        // 遍历分组数据创建选项
+        for (const groupKey in groupedData) {
+            const groupDiv = document.createElement('div');
+            groupDiv.style.marginBottom = '10px';
+
+            const groupHeader = document.createElement('div');
+            groupHeader.style.fontWeight = 'bold';
+            groupHeader.style.marginBottom = '5px';
+            groupHeader.textContent = groupKey;
+            groupDiv.appendChild(groupHeader);
+
+            for (const date in groupedData[groupKey]) {
+                const dateDiv = document.createElement('div');
+                dateDiv.style.marginLeft = '10px';
+                dateDiv.style.marginBottom = '5px';
+
+                const dateHeader = document.createElement('div');
+                dateHeader.style.fontWeight = 'bold';
+                dateHeader.textContent = date;
+                dateDiv.appendChild(dateHeader);
+
+                for (const resolution in groupedData[groupKey][date]) {
+                    const items = groupedData[groupKey][date][resolution];
+                    const isVideo = items[0]?.type === 'video';
+                    const button = document.createElement('button');
+                    button.style.marginLeft = '20px';
+                    button.style.marginBottom = '5px';
+                    button.style.padding = '5px 10px';
+                    button.style.backgroundColor = '#4CAF50';
+                    button.style.color = '#fff';
+                    button.style.border = 'none';
+                    button.style.borderRadius = '3px';
+                    button.style.cursor = 'pointer';
+                    button.style.fontSize = '12px';
+                    button.textContent = `${resolution} (${items.length} ${isVideo ? '个' : '张'})`;
+                    button.onclick = () => downloadImages(groupKey, date, resolution);
+                    dateDiv.appendChild(button);
+                }
+
+                groupDiv.appendChild(dateDiv);
+            }
+
+            menu.appendChild(groupDiv);
+        }
 
         document.body.appendChild(menu);
     };
@@ -210,9 +266,11 @@
                     resolutionDiv.style.alignItems = 'center';
                     resolutionDiv.style.margin = '5px';
 
+                    const isVideo = images[0]?.type === 'video';
+
                     // 下载图片按钮
                     const resolutionButton = document.createElement('button');
-                    resolutionButton.textContent = `${resolution} (${images.length} 张)`;
+                    resolutionButton.textContent = `${resolution} (${images.length} ${isVideo ? '个' : '张'})`;
                     resolutionButton.style.padding = '5px';
                     resolutionButton.style.backgroundColor = '#4CAF50';
                     resolutionButton.style.color = '#fff';
@@ -273,20 +331,31 @@
 
     // 修改下载图片方法
     const downloadImages = (groupKey, date, resolution) => {
-        const images = groupedData[groupKey][date][resolution] || [];
-        images.forEach(async ({ coverUrl, coverUri }, index) => {
+        const items = groupedData[groupKey][date][resolution] || [];
+        items.forEach(async (item, index) => {
             try {
-                const pngUrl = await convertWebpToPng(coverUrl);
-                const filename = `${groupKey}_${date}_${resolution}_${index + 1}.png`;
-                
-                GM_download({
-                    url: pngUrl,
-                    name: filename,
-                    onerror: (error) => console.error(`Failed to download ${filename}:`, error),
-                    onload: () => URL.revokeObjectURL(pngUrl)
-                });
+                if (item.type === 'video') {
+                    // 直接下载视频
+                    const filename = `${groupKey}_${date}_${resolution}_${index + 1}.mp4`;
+                    GM_download({
+                        url: item.videoUrl,
+                        name: filename,
+                        onerror: (error) => console.error(`Failed to download ${filename}:`, error)
+                    });
+                } else {
+                    // 图片处理保持不变
+                    const pngUrl = await convertWebpToPng(item.coverUrl);
+                    const filename = `${groupKey}_${date}_${resolution}_${index + 1}.png`;
+                    
+                    GM_download({
+                        url: pngUrl,
+                        name: filename,
+                        onerror: (error) => console.error(`Failed to download ${filename}:`, error),
+                        onload: () => URL.revokeObjectURL(pngUrl)
+                    });
+                }
             } catch (error) {
-                console.error('Error converting image:', error);
+                console.error('Error downloading:', error);
             }
         });
     };
