@@ -52,6 +52,20 @@
             width: 120px;
         `;
 
+        // 创建音频下载按钮
+        const audioButton = document.createElement('button');
+        audioButton.innerHTML = '仅下载音频';
+        audioButton.style.cssText = `
+            padding: 10px 20px;
+            background-color: #2196F3;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            width: 120px;
+            display: none;  // 默认隐藏
+        `;
+
         // 创建下载后处理选项
         const selectContainer = document.createElement('div');
         selectContainer.style.cssText = `
@@ -98,6 +112,7 @@
         selectContainer.appendChild(selectLabel);
         selectContainer.appendChild(select);
         buttonRow.appendChild(button);
+        buttonRow.appendChild(audioButton);
         buttonRow.appendChild(selectContainer);
 
         const progressContainer = document.createElement('div');
@@ -136,6 +151,7 @@
         container.progressContainer = progressContainer;
         container.progressText = progressText;
         container.button = button;
+        container.audioButton = audioButton;
         container.select = select;
 
         return container;
@@ -396,19 +412,39 @@
         const observer = new MutationObserver((mutations) => {
             for (const mutation of mutations) {
                 for (const node of mutation.addedNodes) {
-                    // 检查是否为iframe元素
                     if (node.tagName === 'IFRAME') {
-                        // 检查是否匹配任一PDF查看器URL模式
                         if (node.src.includes('/pdfjs/') || node.src.includes('x-edu-pdfjs.ykt.eduyun.cn')) {
                             const buttonContainer = createDownloadButton();
                             document.body.appendChild(buttonContainer);
                             window._downloadButton = buttonContainer;
 
-                            // 尝试从iframe的src中提取PDF信息
                             const pdfInfo = extractPdfInfo(node.src);
                             if (pdfInfo) {
                                 console.log('发现可直接下载的PDF');
                                 updateButtonStatus(buttonContainer, 'ready');
+
+                                // 检查是否存在音频资源
+                                const hasAudio = document.querySelector('div[class*="audioList-module_audio-list-wrapper"]');
+                                if (hasAudio) {
+                                    buttonContainer.audioButton.style.display = 'block';
+                                    
+                                    // 设置音频按钮点击事件
+                                    buttonContainer.audioButton.onclick = async () => {
+                                        try {
+                                            const fileName = await getFileName();
+                                            updateButtonStatus(buttonContainer, 'downloading');
+                                            await handleAudioDownload(fileName, pdfInfo.authHeader);
+                                            updateButtonStatus(buttonContainer, 'ready');
+                                            await handlePostDownload(window._downloadButton);
+                                        } catch (error) {
+                                            console.error('音频下载失败:', error);
+                                            alert('音频下载失败，请重试');
+                                            updateButtonStatus(buttonContainer, 'ready');
+                                        }
+                                    };
+                                }
+
+                                // 原有的PDF下载按钮点击事件
                                 buttonContainer.button.onclick = async () => {
                                     try {
                                         const fileName = await getFileName();
@@ -421,7 +457,6 @@
                                         await downloadTxtFile(fileName, contentId);
                                         updateButtonStatus(buttonContainer, 'ready');
                                         
-                                        // 所有下载完成后再执行后续操作
                                         await handlePostDownload(window._downloadButton);
                                     } catch (error) {
                                         console.error('直接下载失败:', error);
