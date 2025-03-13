@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Smartedu PDF Downloader
 // @namespace    http://tampermonkey.net/
-// @version      0.1
+// @version      0.2
 // @description  Download PDFs from basic.smartedu.cn
 // @author       23233
 // @match        https://basic.smartedu.cn/*
@@ -65,6 +65,20 @@
             display: none;  // 默认隐藏
         `;
 
+            // 创建txt下载按钮
+            const txtButton = document.createElement('button');
+            txtButton.innerHTML = '仅下载txt';
+            txtButton.style.cssText = `
+            padding: 10px 20px;
+            background-color: #FF9800;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            width: 120px;
+            display: none;  // 默认隐藏
+        `;
+
             // 创建下载后处理选项
             const selectContainer = document.createElement('div');
             selectContainer.style.cssText = `
@@ -102,17 +116,40 @@
                 select.appendChild(option);
             });
 
-            // 保存用户选择
-            select.value = localStorage.getItem('pdfDownloadAction') || 'none';
-            select.addEventListener('change', () => {
-                localStorage.setItem('pdfDownloadAction', select.value);
+            // 添加自动下载复选框
+            const autoDownloadContainer = document.createElement('div');
+            autoDownloadContainer.style.cssText = `
+                display: flex;
+                align-items: center;
+                gap: 5px;
+                margin-left: 10px;
+            `;
+
+            const autoDownloadCheckbox = document.createElement('input');
+            autoDownloadCheckbox.type = 'checkbox';
+            autoDownloadCheckbox.id = 'autoDownload';
+            autoDownloadCheckbox.checked = localStorage.getItem('autoDownload') === 'true';
+
+            const autoDownloadLabel = document.createElement('label');
+            autoDownloadLabel.htmlFor = 'autoDownload';
+            autoDownloadLabel.textContent = '自动下载';
+            autoDownloadLabel.style.cssText = `
+                color: #666;
+                font-size: 12px;
+            `;
+
+            // 保存自动下载选择
+            autoDownloadCheckbox.addEventListener('change', () => {
+                localStorage.setItem('autoDownload', autoDownloadCheckbox.checked);
             });
 
-            selectContainer.appendChild(selectLabel);
-            selectContainer.appendChild(select);
+            autoDownloadContainer.appendChild(autoDownloadCheckbox);
+            autoDownloadContainer.appendChild(autoDownloadLabel);
             buttonRow.appendChild(button);
             buttonRow.appendChild(audioButton);
+            buttonRow.appendChild(txtButton);
             buttonRow.appendChild(selectContainer);
+            buttonRow.appendChild(autoDownloadContainer);
 
             const progressContainer = document.createElement('div');
             progressContainer.style.cssText = `
@@ -151,6 +188,7 @@
             container.progressText = progressText;
             container.button = button;
             container.audioButton = audioButton;
+            container.txtButton = txtButton;
             container.select = select;
 
             return container;
@@ -481,6 +519,24 @@
 
                                     // 检查是否存在音频资源
                                     const hasAudio = document.querySelector('div[class*="audioList-module_audio-list-wrapper"]');
+                                    
+                                    // 总是显示txt按钮
+                                    buttonContainer.txtButton.style.display = 'block';
+                                    
+                                    // 设置txt按钮点击事件
+                                    buttonContainer.txtButton.onclick = async () => {
+                                        try {
+                                            const fileName = await getFileName();
+                                            const urlParams = new URLSearchParams(window.location.search);
+                                            const contentId = urlParams.get('contentId');
+                                            await downloadTxtFile(fileName, contentId);
+                                            await handlePostDownload(window._downloadButton);
+                                        } catch (error) {
+                                            console.error('txt下载失败:', error);
+                                            alert('txt下载失败，请重试');
+                                        }
+                                    };
+
                                     if (hasAudio) {
                                         buttonContainer.audioButton.style.display = 'block';
 
@@ -500,6 +556,32 @@
                                         };
                                     }
 
+                                    // 检查是否启用了自动下载
+                                    const autoDownload = localStorage.getItem('autoDownload') === 'true';
+                                    if (autoDownload) {
+                                        // 延迟一小段时间后自动触发下载
+                                        setTimeout(async () => {
+                                            try {
+                                                const fileName = await getFileName();  // 移到这里，确保先获取文件名
+                                                const urlParams = new URLSearchParams(window.location.search);
+                                                const contentId = urlParams.get('contentId');
+
+                                                updateButtonStatus(buttonContainer, 'downloading');
+                                                await directDownloadPDF(pdfInfo.pdfUrl, pdfInfo.authHeader, fileName);
+                                                await downloadTxtFile(fileName, contentId);
+                                                await handleAudioDownload(fileName, pdfInfo.authHeader);
+                                                updateButtonStatus(buttonContainer, 'ready');
+
+                                                // 自动下载时强制关闭页面
+                                                await new Promise(resolve => setTimeout(resolve, 1000));
+                                                window.close();
+                                            } catch (error) {
+                                                console.error('自动下载失败:', error);
+                                                updateButtonStatus(buttonContainer, 'ready');
+                                            }
+                                        }, 1000);
+                                    }
+
                                     // 原有的PDF下载按钮点击事件
                                     buttonContainer.button.onclick = async () => {
                                         try {
@@ -509,8 +591,8 @@
 
                                             updateButtonStatus(buttonContainer, 'downloading');
                                             await directDownloadPDF(pdfInfo.pdfUrl, pdfInfo.authHeader, fileName);
-                                            await handleAudioDownload(fileName, pdfInfo.authHeader);
                                             await downloadTxtFile(fileName, contentId);
+                                            await handleAudioDownload(fileName, pdfInfo.authHeader);
                                             updateButtonStatus(buttonContainer, 'ready');
 
                                             await handlePostDownload(window._downloadButton);
@@ -598,6 +680,21 @@
         // 添加这行代码：将container添加到页面中
         container.appendChild(buttonRow);
         document.body.appendChild(container);
+
+        // 添加批量下载按钮
+        const batchDownloadBtn = document.createElement('button');
+        batchDownloadBtn.textContent = '批量下载全部';
+        batchDownloadBtn.style.cssText = 'position: fixed; top: 100px; right: 20px; z-index: 9999; padding: 10px;';
+        document.body.appendChild(batchDownloadBtn);
+
+        batchDownloadBtn.addEventListener('click', () => {
+            const items = document.querySelectorAll('li[class^="index-module_item"]');
+            items.forEach((item, index) => {
+                setTimeout(() => {
+                    item.click();
+                }, index * 200); // 每个点击间隔500毫秒
+            });
+        });
     }
 
 })();
