@@ -224,19 +224,112 @@
         updateToggleButtonText();
     }
 
+    function insertImageInfo(title, images) {
+        // 如果没有图片，则不处理
+        if (!images || images.length === 0) {
+            return;
+        }
+
+        // 创建一个唯一标识，使用第一张图片的URL
+        const imageId = images[0].url;
+
+        // 如果图片组已经存在，则不再插入
+        if (videoList.some(item => item.id === imageId)) {
+            return;
+        }
+
+        const panel = document.getElementById("controlPanel");
+
+        const container = document.createElement("div");
+        container.style.display = "flex";
+        container.style.alignItems = "center";
+        container.style.marginBottom = "10px";
+
+        const checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.style.marginRight = "10px";
+
+        const link = document.createElement("a");
+        if (!title) title = fileName();
+        title = ++count + "_" + title;
+        link.href = images[0].url; // 链接到第一张图片
+        link.innerText = title;
+        link.target = "_blank";
+        link.style.color = "red"
+        link.title = "图文" + images.length + "张"
+        link.style.flex = "1";
+        // 设置样式只显示一行，超出部分用省略号代替
+        link.style.whiteSpace = "nowrap";
+        link.style.overflow = "hidden";
+        link.style.textOverflow = "ellipsis";
+
+        container.appendChild(checkbox);
+        container.appendChild(link);
+
+        panel.appendChild(container);
+
+        videoList.push({
+            checkbox,
+            title: title,
+            url: images[0].url,
+            id: imageId,
+            isImageGroup: true,
+            images: images
+        });
+        updateToggleButtonText();
+    }
+
     // 下载所有视频
     function downloadAll() {
-        videoList.forEach(video => downloadVideo(video.title, video.url));
+        videoList.forEach(video => processDownload(video));
     }
 
     // 下载选中的视频
     function downloadSelected() {
         videoList.forEach(video => {
             if (video.checkbox.checked) {
-                downloadVideo(video.title, video.url);
+                processDownload(video);
             }
         });
     }
+
+    // 处理下载单个项目
+    function processDownload(item) {
+        if (item?.isImageGroup) {
+            // 这是图文 遍历images
+            item.images.forEach((d, i) => {
+                // 创建唯一标识符，确保不会重复下载
+                const uniqueUrl = d.url;
+                const uniqueTitle = item.title + "_" + (i + 1);
+
+                // 检查是否已在下载队列中
+                if (downloadQueue.downloading.has(uniqueUrl)) {
+                    showToast(`图片 ${uniqueTitle} 已在下载队列中`);
+                    return;
+                }
+
+                downloadQueue.add({
+                    title: uniqueTitle,
+                    url: uniqueUrl,
+                    isImage: true
+                });
+            });
+        } else {
+            // 这是视频
+            let videoUrl = item.url;
+            // 确保 URL 使用 HTTPS
+            if (!videoUrl.startsWith('https://')) {
+                videoUrl = videoUrl.replace('http://', 'https://');
+            }
+            // 如果视频已在下载队列中，则跳过
+            if (downloadQueue.downloading.has(videoUrl)) {
+                showToast("该视频已在下载队列中");
+                return;
+            }
+            downloadQueue.add({...item, url: videoUrl});
+        }
+    }
+
 
     // 下载队列管理器
     class DownloadQueue {
@@ -274,7 +367,7 @@
             const xhr = new XMLHttpRequest();
             xhr.open("GET", video.url, true);
             xhr.responseType = "blob";
-            
+
             xhr.onload = () => {
                 if (xhr.status === 200) {
                     const blob = xhr.response;
@@ -282,7 +375,16 @@
                     const a = document.createElement("a");
                     a.style.display = "none";
                     a.href = downloadUrl;
-                    a.download = video.title + ".mp4";
+
+                    // 检查URL中的文件扩展名
+                    let extension = video.isImage ? ".jpg" : ".mp4";
+                    const urlPath = video.url.split('?')[0]; // 移除查询参数
+                    const urlExtMatch = urlPath.match(/\.([a-zA-Z0-9]+)$/);
+                    if (urlExtMatch && urlExtMatch[1]) {
+                        extension = "." + urlExtMatch[1];
+                    }
+
+                    a.download = video.title + extension;
                     document.body.appendChild(a);
                     a.click();
                     window.URL.revokeObjectURL(downloadUrl);
@@ -308,37 +410,29 @@
         completeDownload(video) {
             this.currentDownloads--;
             this.downloading.delete(video.url);
-            videoList = videoList.filter(v => v.url !== video.url);
-            const panel = document.getElementById("controlPanel");
-            if (panel) {
-                const videoElement = Array.from(panel.children).find(
-                    el => el.querySelector('a')?.href === video.url
-                );
-                if (videoElement) {
-                    panel.removeChild(videoElement);
+
+            // 只有非图片组中的单独图片才需要从列表中移除
+            // 图片组中的单独图片不需要从videoList中移除，因为它们不在列表中
+            if (!video.isImage) {
+                videoList = videoList.filter(v => v.url !== video.url);
+                const panel = document.getElementById("controlPanel");
+                if (panel) {
+                    const videoElement = Array.from(panel.children).find(
+                        el => el.querySelector('a')?.href === video.url
+                    );
+                    if (videoElement) {
+                        panel.removeChild(videoElement);
+                    }
                 }
+                updateToggleButtonText();
             }
-            updateToggleButtonText();
+
             this.processQueue();
         }
     }
 
     // 创建下载队列实例
     const downloadQueue = new DownloadQueue(5);
-
-    // 修改下载视频函数
-    function downloadVideo(title, url) {
-        // 确保 URL 使用 HTTPS
-        if (!url.startsWith('https://')) {
-            url = url.replace('http://', 'https://');
-        }
-        // 如果视频已在下载队列中，则跳过
-        if (downloadQueue.downloading.has(url)) {
-            showToast("该视频已在下载队列中");
-            return;
-        }
-        downloadQueue.add({title, url});
-    }
 
     // 保存原始的 XMLHttpRequest
     const originalXHR = window.XMLHttpRequest;
@@ -375,15 +469,27 @@
     function parseAndDownload(response) {
         if (response && response.aweme_list && response.aweme_list.length > 0) {
             response.aweme_list.forEach(aweme => {
+                let title = aweme.preview_title || aweme?.desc;
+                const prefix = aweme.mix_info?.statis?.current?.episode ? `第${aweme.mix_info?.statis?.current?.episode}集：` : ''
+                title = (prefix + title);
                 try {
-                    if (aweme.aweme_type !== 101) {
+                    if (aweme.aweme_type === 0 && aweme.media_type === 4) {
                         let videoUrl = aweme.video.play_addr.url_list[0];
-                        let title = aweme.preview_title || aweme.desc;
-                        const prefix = aweme.mix_info?.statis?.current?.episode ? `第${aweme.mix_info?.statis?.current?.episode}集：` : ''
-                        title = (prefix + title);
                         if (videoUrl) {
                             insertVideoInfo(title, videoUrl);
                         }
+                    }
+                    if (aweme.aweme_type === 68 && aweme.media_type === 2) {
+
+                        const images = aweme.images.map(image => {
+                            return {
+                                url: image.url_list[0],
+                                width: image.width,
+                                height: image.height
+                            };
+                        });
+
+                        insertImageInfo(title, images)
                     }
                 } catch (e) {
                     console.log(aweme, 'error', e);
@@ -443,7 +549,7 @@
                     const title = targetElement.querySelector('[data-e2e="video-desc"] span').textContent.replace(/\s/g, '');
                     if (videoSource && videoSource.src) {
                         const videoUrl = videoSource.src;
-                        downloadVideo(title, videoUrl);
+                        processDownload({title, url: videoUrl});
                     } else {
                         let isDownload = false;
                         // 去videoList根据title去查找链接
@@ -453,7 +559,7 @@
                             console.log(findTitle, title, 'findTitle')
                             if (findTitle === title) {
                                 isDownload = true;
-                                downloadVideo(video.title, video.url);
+                                processDownload(video);
                             }
                         });
                         if (!isDownload)
@@ -493,7 +599,7 @@
         try {
             // 获取用户名（h1标签）
             const userName = document.querySelector('h1')?.innerText?.trim() || '';
-            
+
             // 获取抖音号
             // 使用属性选择器查找包含"抖音号："文本的span
             const spans = Array.from(document.getElementsByTagName('span'));
@@ -502,14 +608,14 @@
 
             // 组合信息
             const info = `${userName} ${douyinId}`;
-            
+
             // 复制到剪贴板
             navigator.clipboard.writeText(info).then(() => {
                 showToast("用户信息已复制到剪贴板");
             }).catch(err => {
                 console.error('复制失败:', err);
                 showToast("复制失败，请手动复制");
-                
+
                 // 创建临时输入框作为后备方案
                 const textarea = document.createElement('textarea');
                 textarea.value = info;
