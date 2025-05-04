@@ -1,11 +1,10 @@
 // ==UserScript==
 // @name         即梦图片视频无水印下载（聚合下载版）
 // @namespace    http://tampermonkey.net/
-// @version      2.1
+// @version      2.2
 // @description  按history_group_key聚合，再通过created_time按天聚合，再按分辨率进行聚合，并选择下载
 // @author       23233
-// @match        https://jimeng.jianying.com/ai-tool/image/generate
-// @match        https://jimeng.jianying.com/ai-tool/video/generate
+// @match        https://jimeng.jianying.com/*
 // @grant        GM_download
 // @run-at       document-start
 // ==/UserScript==
@@ -70,7 +69,7 @@
                     let width = 0;
                     let height = 0;
                     let videoUrl = '';
-                    
+
                     if (generate_type === 10) { // 视频类型
                         const video = commonAttrItem?.video || common_attr?.video;
                         if (video?.transcoded_video?.origin?.video_url) {
@@ -140,6 +139,65 @@
             console.error('Error processing response:', e);
         }
     };
+
+    const injectDownloadButtonsForVideos = () => {
+        const videos = document.querySelectorAll('video');
+        videos.forEach(video => {
+            if (video.dataset.hasDownloadButton) return;
+            video.dataset.hasDownloadButton = 'true';
+
+            const wrapper = document.createElement('div');
+            wrapper.style.position = 'absolute';
+            wrapper.style.top = '5px';
+            wrapper.style.left = '5px';
+            wrapper.style.zIndex = '9999';
+
+            const button = document.createElement('button');
+            button.textContent = '⬇';
+            button.title = '下载无水印视频';
+            button.style.padding = '2px 5px';
+            button.style.background = 'rgba(0,0,0,0.6)';
+            button.style.color = 'white';
+            button.style.border = 'none';
+            button.style.borderRadius = '3px';
+            button.style.cursor = 'pointer';
+            button.style.fontSize = '14px';
+
+            button.addEventListener('click', async (e) => {
+                e.stopPropagation();
+                const videoUrl = video.src;
+                if (!videoUrl) return alert('未找到视频URL');
+
+                // 从 URL 中提取 ID
+                const match = location.pathname.match(/\/ai-tool\/work-detail\/(\d+)/);
+                const filename = match ? `${match[1]}.mp4` : `video_${Date.now()}.mp4`;
+
+                try {
+                    const res = await fetch(videoUrl);
+                    const blob = await res.blob();
+                    const url = URL.createObjectURL(blob);
+
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = filename;
+                    a.style.display = 'none';
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                } catch (err) {
+                    console.error('下载失败', err);
+                    alert('视频下载失败');
+                }
+            });
+
+            wrapper.appendChild(button);
+            video.style.position = 'relative';
+            video.parentElement?.style.setProperty('position', 'relative', 'important');
+            video.parentElement?.appendChild(wrapper);
+        });
+    };
+
 
     // 更新按钮文本
     const updateButtonText = () => {
@@ -217,7 +275,7 @@
     const exportToCSV = (groupKey, date, resolution) => {
         const images = groupedData[groupKey][date][resolution] || [];
         let csvContent = "序号,图片链接,宽度,高度\n";
-        
+
         images.forEach((image, index) => {
             csvContent += `${index + 1},${image.coverUrl},${image.width},${image.height}\n`;
         });
@@ -254,7 +312,7 @@
                 const dateDiv = document.createElement('div');
                 dateDiv.style.marginLeft = '10px';
                 dateDiv.style.marginTop = '5px';
-                
+
                 const dateTitle = document.createElement('div');
                 dateTitle.textContent = `日期: ${date}`;
                 dateTitle.style.fontWeight = 'bold';
@@ -311,19 +369,19 @@
             const canvas = document.createElement('canvas');
             const ctx = canvas.getContext('2d');
             const tempImg = new Image();
-            
+
             tempImg.crossOrigin = 'anonymous';
             tempImg.onload = () => {
                 canvas.width = tempImg.width;
                 canvas.height = tempImg.height;
                 ctx.drawImage(tempImg, 0, 0);
-                
+
                 canvas.toBlob((blob) => {
                     const url = URL.createObjectURL(blob);
                     resolve(url);
                 }, 'image/png');
             };
-            
+
             tempImg.onerror = reject;
             tempImg.src = imageUrl;
         });
@@ -346,7 +404,7 @@
                     // 图片处理保持不变
                     const pngUrl = await convertWebpToPng(item.coverUrl);
                     const filename = `${groupKey}_${date}_${resolution}_${index + 1}.png`;
-                    
+
                     GM_download({
                         url: pngUrl,
                         name: filename,
@@ -411,7 +469,7 @@
                 const pngUrl = await convertWebpToPng(img.src);
                 const timestamp = Date.now();
                 const filename = `${timestamp}.png`;
-                
+
                 GM_download({
                     url: pngUrl,
                     name: filename,
@@ -435,16 +493,16 @@
                     // 查找所有元素节点，检查是否有包含"再次生成"文字的节点
                     const elements = document.getElementsByTagName('*');
                     const currentImageButton = document.getElementById('downloadCurrentImageButton');
-                    
+
                     for (const element of elements) {
-                        if (element.childNodes.length === 1 && 
-                            element.firstChild.nodeType === Node.TEXT_NODE && 
+                        if (element.childNodes.length === 1 &&
+                            element.firstChild.nodeType === Node.TEXT_NODE &&
                             element.firstChild.textContent === '再次生成') {
                             currentImageButton.style.display = 'block';
                             return;
                         }
                     }
-                    
+
                     // 如果没找到包含"再次生成"的节点，隐藏按钮
                     if (currentImageButton) {
                         currentImageButton.style.display = 'none';
@@ -479,4 +537,13 @@
     };
 
     init();
+
+    const startVideoMonitor = () => {
+        const observer = new MutationObserver(() => injectDownloadButtonsForVideos());
+        observer.observe(document.body, { childList: true, subtree: true });
+        injectDownloadButtonsForVideos();
+    };
+
+    window.addEventListener('load', startVideoMonitor);
+
 })();
