@@ -1,10 +1,10 @@
 // ==UserScript==
-// @name         Jules 模板管理器 (v6.0 - 遵从可信类型)
+// @name         Jules 模板管理器
 // @namespace    http://tampermonkey.net/
-// @version      6.0
-// @description  遵从页面的Trusted Types安全策略，通过逐个创建元素的方式构建UI，确保脚本能够运行。
+// @version      6.1
+// @description  遵从页面的Trusted Types安全策略，通过逐个创建元素的方式构建UI，确保脚本能够运行。按钮尺寸已优化。
 // @author        Gemini (Final version respecting Trusted Types)
-// @match        https://jules.google.com/task
+// @match        https://jules.google.com/task*
 // @grant        GM_setValue
 // @grant        GM_getValue
 // @grant        GM_addStyle
@@ -27,8 +27,40 @@
         uiCreated = true;
 
         GM_addStyle(`
-            #template-settings-btn-v6 { position: fixed !important; bottom: 20px !important; right: 20px !important; background-color: #4285F4 !important; color: white !important; border: none !important; border-radius: 50% !important; width: 50px !important; height: 50px !important; font-size: 24px !important; cursor: pointer !important; box-shadow: 0 4px 8px rgba(0,0,0,0.2) !important; z-index: 99999 !important; display: flex !important; align-items: center !important; justify-content: center !important; }
-            #template-settings-panel-v6 { position: fixed !important; top: 50% !important; left: 50% !important; transform: translate(-50%, -50%) !important; width: 60vw !important; max-width: 650px !important; background-color: white !important; border: 1px solid #ccc !important; box-shadow: 0 5px 15px rgba(0,0,0,0.3) !important; z-index: 100000 !important; display: none; flex-direction: column !important; border-radius: 8px !important; }
+            /* --- 按钮尺寸已缩小一半 --- */
+            #template-settings-btn-v6 {
+                position: fixed !important;
+                bottom: 15px !important; /* 调整边距 */
+                right: 15px !important;  /* 调整边距 */
+                background-color: #4285F4 !important;
+                color: white !important;
+                border: none !important;
+                border-radius: 50% !important;
+                width: 25px !important;   /* 宽度减半 */
+                height: 25px !important;  /* 高度减半 */
+                font-size: 12px !important; /* 图标大小减半 */
+                cursor: pointer !important;
+                box-shadow: 0 2px 6px rgba(0,0,0,0.25) !important; /* 阴影微调 */
+                z-index: 99999 !important;
+                display: flex !important;
+                align-items: center !important;
+                justify-content: center !important;
+            }
+            #template-settings-panel-v6 {
+                position: fixed !important;
+                top: 50% !important;
+                left: 50% !important;
+                transform: translate(-50%, -50%) !important;
+                width: 60vw !important;
+                max-width: 650px !important;
+                background-color: white !important;
+                border: 1px solid #ccc !important;
+                box-shadow: 0 5px 15px rgba(0,0,0,0.3) !important;
+                z-index: 100000 !important;
+                display: none;
+                flex-direction: column !important;
+                border-radius: 8px !important;
+            }
         `);
 
         // --- 创建设置按钮 ---
@@ -48,7 +80,7 @@
         const title = document.createElement('span');
         title.textContent = '编辑默认模板';
         const closeBtn = document.createElement('span');
-        closeBtn.textContent = '×'; // 使用纯文本 '×' 而不是 HTML 实体
+        closeBtn.textContent = '×';
         closeBtn.title = '关闭';
         closeBtn.style.cssText = 'cursor: pointer; font-size: 20px; font-weight: bold;';
         header.appendChild(title);
@@ -105,7 +137,7 @@
         });
     }
 
-    // 主监视循环 (保持不变)
+    // 主监视循环
     setInterval(async () => {
         const mainTextarea = document.querySelector('textarea.prompt-editor');
         if (!mainTextarea) return;
@@ -115,6 +147,7 @@
                 createAndShowUI();
             }
             const template = await GM_getValue(STORAGE_KEY, DEFAULT_TEMPLATE_TEXT);
+            // 再次检查，防止在异步获取模板期间用户输入了内容
             if (mainTextarea.value.trim() === '') {
                 mainTextarea.value = template;
                 mainTextarea.dispatchEvent(new Event('input', { bubbles: true }));
