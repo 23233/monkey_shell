@@ -1,9 +1,9 @@
 // ==UserScript==
-// @name         Dofollow & AI Page Analyzer (with Link Counter)
+// @name         SEO页面内容分析器
 // @namespace    http://tampermonkey.net/
 // @version      2.4
-// @description  Triggers hover effect on external links only when they become visible in the viewport. Plus other features.
-// @author       Gemini & Gemini (Modified by Gemini)
+// @description  分析外链,AI分析页面内容.
+// @author       23233
 // @match        *://*/*
 // @connect      entry.a0go.com
 // @grant        GM_addStyle
