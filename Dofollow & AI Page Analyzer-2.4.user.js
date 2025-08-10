@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         SEO页面内容分析器
 // @namespace    http://tampermonkey.net/
-// @version      2.4
-// @description  分析外链,AI分析页面内容.
+// @version      2.6
+// @description  分析Dofollow外链, AI分析页面内容, 支持链接跳转导航.
 // @author       23233
 // @match        *://*/*
 // @connect      entry.a0go.com
@@ -21,19 +21,26 @@
         return;
     }
 
-    // --- 配置信息 ---
+    // --- 全局变量和配置 ---
     const CUSTOM_BASE_URL = "http://entry.a0go.com:7544";
     const MODEL_NAME = "gemini-2.5-pro";
     const DOFOLLOW_THRESHOLD = 5;
     let apiKey = null;
+    let dofollowLinks = []; // 存储页面上所有Dofollow链接的元素
+    let currentLinkIndex = -1; // 当前导航到的链接索引
 
     // --- 注入UI样式 ---
     GM_addStyle(`
         #ai-analyzer-toggle-btn {
-            position: fixed; bottom: 20px; right: 20px; width: 50px; height: 50px;
-            background-color: #007bff; color: white; border: none; border-radius: 50%;
-            font-size: 24px; cursor: pointer; z-index: 9998; box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+            position: fixed; bottom: 20px; right: 30px;
+            min-width: 40px; height: 40px; padding: 0 12px;
+            background-color: #007bff; color: white; border: none;
+            border-radius: 20px;
+            font-size: 18px; font-weight: bold; cursor: pointer;
+            z-index: 100000;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
             display: flex; justify-content: center; align-items: center;
+            line-height: 40px;
         }
         #ai-analyzer-panel {
             position: fixed; bottom: 80px; right: 20px; width: 450px; max-height: 500px;
@@ -53,6 +60,30 @@
             margin-left: 10px;
             font-weight: normal;
         }
+        /* --- 新增：导航箭头样式 --- */
+        #dofollow-nav-controls {
+            margin-left: 8px;
+            display: inline-block; /* 默认不显示, JS控制 */
+        }
+        .dofollow-nav-arrow {
+            font-size: 16px;
+            cursor: pointer;
+            user-select: none;
+            padding: 0 4px;
+            color: #333;
+            font-weight: bold;
+        }
+        .dofollow-nav-arrow:hover {
+            color: #007bff;
+        }
+        /* --- 新增：链接高亮样式 --- */
+        .highlighted-dofollow-link {
+            outline: 3px solid #007bff !important;
+            box-shadow: 0 0 15px rgba(0, 123, 255, 0.7) !important;
+            border-radius: 3px;
+            transition: outline 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+
         .ai-analyzer-body { padding: 15px; overflow-y: auto; color: #333; }
         #ai-settings-btn { font-size: 20px; cursor: pointer; user-select: none; }
         #ai-settings-area { display: none; padding: 10px; margin-top: 10px; background-color: #e9ecef; border-radius: 4px; }
@@ -63,25 +94,11 @@
         #copy-table-btn { background-color: #007bff; color: white; border: none; padding: 8px 12px; border-radius: 4px; cursor: pointer; margin-top: 15px; float: right; }
         .status-message { font-style: italic; color: #666; }
         .error-message { color: #d9534f; font-weight: bold; white-space: pre-wrap; word-wrap: break-word; }
-        #ai-analyzer-panel table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        #ai-analyzer-panel table { width: 100%; border-collapse: collapse; margin-top: 10px; background-color: #FFFFFF; color: #333333; }
         #ai-analyzer-panel th, #ai-analyzer-panel td { border: 1px solid #ddd; padding: 8px; text-align: left; font-size: 14px; word-break: break-all; }
-        #ai-analyzer-panel th { background-color: #e9ecef; }
-        .link-follow-indicator {
-            position: fixed;
-            background-color: rgba(0, 0, 0, 0.75);
-            color: white;
-            padding: 2px 5px;
-            border-radius: 3px;
-            font-size: 12px;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            z-index: 10001;
-            pointer-events: none;
-            opacity: 0;
-            transform: translateY(10px);
-            animation: dofollow-fade-in-up 0.4s ease-out forwards;
-            text-align: center;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
-        }
+        #ai-analyzer-panel th { background-color: #f2f2f2; color: #000000; font-weight: bold; }
+        #ai-analyzer-panel td { background-color: #FFFFFF; color: #333333; }
+        .link-follow-indicator { position: fixed; background-color: rgba(0, 0, 0, 0.75); color: white; padding: 2px 5px; border-radius: 3px; font-size: 12px; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; z-index: 10001; pointer-events: none; opacity: 0; transform: translateY(10px); animation: dofollow-fade-in-up 0.4s ease-out forwards; text-align: center; box-shadow: 0 2px 5px rgba(0,0,0,0.2); }
         @keyframes dofollow-fade-in-up { to { opacity: 1; transform: translateY(0); } }
     `);
 
@@ -90,14 +107,19 @@
     panel.id = 'ai-analyzer-panel';
     const toggleButton = document.createElement('button');
     toggleButton.id = 'ai-analyzer-toggle-btn';
-    toggleButton.innerHTML = '&#x1F916;';
+    toggleButton.textContent = '0';
     document.body.appendChild(toggleButton);
 
     panel.innerHTML = `
         <div class="ai-analyzer-header">
             <div class="header-left">
                  <h3>页面分析助手</h3>
-                 <span id="external-link-counter" title="页面外链总数"></span>
+                 <span id="external-link-counter" title="页面Dofollow外链数量"></span>
+                 <!-- 新增: 导航箭头容器 -->
+                 <span id="dofollow-nav-controls" style="display: none;">
+                    <span id="dofollow-nav-up" class="dofollow-nav-arrow" title="上一个Dofollow链接">▲</span>
+                    <span id="dofollow-nav-down" class="dofollow-nav-arrow" title="下一个Dofollow链接">▼</span>
+                 </span>
             </div>
             <span id="ai-settings-btn" title="设置API Key">⚙️</span>
         </div>
@@ -120,92 +142,135 @@
     // --- 功能函数 ---
 
     /**
-     * 计算并更新页面中的外链总数。
+     * [修改] 扫描、计数并存储Dofollow外链，同时控制导航箭头的可见性。
      */
-    function updateExternalLinkCount() {
+    function scanAndPrepareDofollowLinks() {
+        // 重置状态
+        dofollowLinks = [];
+        currentLinkIndex = -1;
+
         const currentHostname = window.location.hostname;
-        let externalLinkCount = 0;
         document.querySelectorAll('a[href]').forEach(link => {
             try {
-                const linkHostname = new URL(link.href).hostname;
+                if (!link.href || !link.offsetParent) return; // 忽略不可见的链接
+                const linkUrl = new URL(link.href, window.location.href);
+                const linkHostname = linkUrl.hostname;
+
                 if (linkHostname && linkHostname !== currentHostname) {
-                    externalLinkCount++;
+                    const rel = link.getAttribute('rel') || '';
+                    if (!rel.toLowerCase().includes('nofollow')) {
+                        dofollowLinks.push(link); // 存储链接元素
+                    }
                 }
-            } catch (e) { /* 忽略无效链接 */ }
+            } catch (e) { /* 忽略无效URL */ }
         });
 
-        const counterElement = document.getElementById('external-link-counter');
-        if (counterElement) {
-            counterElement.textContent = `(外链: ${externalLinkCount})`;
+        const dofollowCount = dofollowLinks.length;
+
+        // 更新面板计数器
+        const panelCounterElement = document.getElementById('external-link-counter');
+        if (panelCounterElement) {
+            panelCounterElement.textContent = `(Dofollow: ${dofollowCount})`;
+        }
+
+        // 更新右下角浮动按钮
+        const toggleButtonElem = document.getElementById('ai-analyzer-toggle-btn');
+        if (toggleButtonElem) {
+            toggleButtonElem.textContent = dofollowCount;
+        }
+
+        // 根据链接数量决定是否显示导航箭头
+        const navControls = document.getElementById('dofollow-nav-controls');
+        if (navControls) {
+            navControls.style.display = dofollowCount > 0 ? 'inline-block' : 'none';
         }
     }
 
     /**
+     * [新增] 导航到指定方向的Dofollow链接
+     * @param {'prev' | 'next'} direction - 导航方向
+     */
+    function navigateToDofollowLink(direction) {
+        if (dofollowLinks.length === 0) return;
+
+        // 移除上一个链接的高亮
+        const previousLink = dofollowLinks[currentLinkIndex];
+        if (previousLink) {
+            previousLink.classList.remove('highlighted-dofollow-link');
+        }
+
+        // 计算下一个索引
+        if (direction === 'next') {
+            currentLinkIndex++;
+            if (currentLinkIndex >= dofollowLinks.length) {
+                currentLinkIndex = 0; // 循环到第一个
+            }
+        } else { // prev
+            currentLinkIndex--;
+            if (currentLinkIndex < 0) {
+                currentLinkIndex = dofollowLinks.length - 1; // 循环到最后一个
+            }
+        }
+
+        // 滚动到新链接并高亮
+        const targetLink = dofollowLinks[currentLinkIndex];
+        if (targetLink) {
+            // 滚动到视图中央
+            targetLink.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+            // 添加高亮效果，2秒后自动移除
+            targetLink.classList.add('highlighted-dofollow-link');
+            setTimeout(() => {
+                targetLink.classList.remove('highlighted-dofollow-link');
+            }, 2000);
+        }
+    }
+
+
+    /**
      * 为指定的链接元素显示一个指示器。
-     * @param {HTMLElement} link - 目标<a>元素。
-     * @param {number} duration - 指示器显示的毫秒数。
      */
     function showIndicatorForLink(link, duration) {
         const isNofollow = link.rel && link.rel.toLowerCase().includes('nofollow');
         const indicatorText = isNofollow ? 'NoF' : 'F';
         const indicatorColor = isNofollow ? '#d9534f' : '#28a745';
-
         const indicator = document.createElement('div');
         indicator.className = 'link-follow-indicator';
         indicator.textContent = indicatorText;
         indicator.style.backgroundColor = indicatorColor;
         document.body.appendChild(indicator);
-
         const linkRect = link.getBoundingClientRect();
         const indicatorRect = indicator.getBoundingClientRect();
-
         let top = linkRect.top + window.scrollY - indicatorRect.height - 5;
         let left = linkRect.left + window.scrollX + (linkRect.width / 2) - (indicatorRect.width / 2);
-
         if (top < window.scrollY + 5) { top = linkRect.bottom + window.scrollY + 5; }
         if (left < window.scrollX + 5) { left = window.scrollX + 5; }
         if (left + indicatorRect.width > window.innerWidth + window.scrollX) { left = window.innerWidth + window.scrollX - indicatorRect.width - 5; }
-
         indicator.style.top = `${top}px`;
         indicator.style.left = `${left}px`;
-
         setTimeout(() => { indicator.remove(); }, duration);
         return indicator;
     }
 
     /**
-     * [新功能] 使用IntersectionObserver来监控所有外链。
-     * 当外链进入视口时，触发指示器动画。
+     * 使用IntersectionObserver来监控所有外链。
      */
     function setupIntersectionObserverForLinks() {
         const currentHostname = window.location.hostname;
-
         const observerCallback = (entries, observer) => {
             entries.forEach(entry => {
-                // 当目标元素进入视口时
                 if (entry.isIntersecting) {
                     const link = entry.target;
-                    // 显示指示器动画
                     showIndicatorForLink(link, 800);
-                    // 动画触发后，停止观察该元素，以防止重复触发
                     observer.unobserve(link);
                 }
             });
         };
-
-        const observerOptions = {
-            root: null, // 相对于浏览器视口
-            rootMargin: '0px',
-            threshold: 0.1 // 元素10%可见时触发
-        };
-
+        const observerOptions = { root: null, rootMargin: '0px', threshold: 0.1 };
         const linkObserver = new IntersectionObserver(observerCallback, observerOptions);
-
-        // 遍历页面上所有链接
         document.querySelectorAll('a[href]').forEach(link => {
             try {
                 const linkHostname = new URL(link.href).hostname;
-                // 如果是外链，则开始观察
                 if (linkHostname && linkHostname !== currentHostname) {
                     linkObserver.observe(link);
                 }
@@ -219,7 +284,6 @@
      */
     function setupLinkHoverIndicator() {
         const currentHostname = window.location.hostname;
-
         document.body.addEventListener('mouseover', event => {
             const link = event.target.closest('a');
             if (!link || !link.href) return;
@@ -227,12 +291,10 @@
                 const linkHostname = new URL(link.href).hostname;
                 if (!linkHostname || linkHostname === currentHostname) return;
             } catch (e) { return; }
-
             if (currentIndicator) {
                 clearTimeout(currentIndicator.timeoutId);
                 currentIndicator.remove();
             }
-
             const indicator = showIndicatorForLink(link, 600);
             currentIndicator = indicator;
             indicator.timeoutId = setTimeout(() => {
@@ -251,10 +313,8 @@
         setupEventListeners();
         setupLinkHoverIndicator();
 
-        // [修改] 延迟1秒后更新外链计数，并启动对可见外链的动画监控。
         setTimeout(() => {
-            updateExternalLinkCount();
-            // 原来的 animateAllExternalLinks() 已被替换
+            scanAndPrepareDofollowLinks(); // [修改] 调用新函数
             setupIntersectionObserverForLinks();
         }, 1000);
     }
@@ -293,6 +353,12 @@
                 alert('API Key不能为空！');
             }
         });
+
+        // [新增] 为导航箭头绑定点击事件
+        const navUp = document.getElementById('dofollow-nav-up');
+        const navDown = document.getElementById('dofollow-nav-down');
+        if (navUp) navUp.addEventListener('click', () => navigateToDofollowLink('prev'));
+        if (navDown) navDown.addEventListener('click', () => navigateToDofollowLink('next'));
     }
 
     async function runAnalysis() {
@@ -304,19 +370,8 @@
         }
 
         resultsDiv.innerHTML = '<p class="status-message">正在扫描页面Dofollow外链...</p>';
-        const links = Array.from(document.getElementsByTagName('a'));
-        const currentHostname = window.location.hostname;
-        let dofollowCount = 0;
-        links.forEach(link => {
-            try {
-                const linkHostname = new URL(link.href).hostname;
-                if (linkHostname && linkHostname !== currentHostname) {
-                    if (!link.rel || !link.rel.toLowerCase().includes('nofollow')) {
-                        dofollowCount++;
-                    }
-                }
-            } catch (e) { /* Invalid URL */ }
-        });
+        scanAndPrepareDofollowLinks(); // 再次扫描以确保数据最新
+        const dofollowCount = dofollowLinks.length;
 
         if (dofollowCount <= DOFOLLOW_THRESHOLD) {
             const reason = `分析终止：页面Dofollow外链数量为 ${dofollowCount}，未超过 ${DOFOLLOW_THRESHOLD} 个的阈值。`;
@@ -360,11 +415,10 @@
         `;
         const requestPayload = { contents: [{"role": "user", "parts": [{ "text": prompt }]}] };
         const apiUrl = `${CUSTOM_BASE_URL}/v1beta/models/${MODEL_NAME}:generateContent?key=${currentApiKey}`;
-
         GM_xmlhttpRequest({
             method: "POST", url: apiUrl, headers: { "Content-Type": "application/json" }, data: JSON.stringify(requestPayload),
             onload: function(response) {
-                 try {
+                try {
                     const aiRawData = JSON.parse(response.responseText);
                     if (aiRawData.error) {
                         console.error("AI API Error:", aiRawData.error);
