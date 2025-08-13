@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         SEO页面内容分析器 (美化修复版)
 // @namespace    http://tampermonkey.net/
-// @version      3.6
-// @description  分析Dofollow外链, AI分析页面内容, 支持链接跳转导航, 并可提交链接到外部系统. 修复了TrustedHTML并美化了UI, 新增每日提交计数功能, 优化了提交和API密钥处理逻辑.
+// @version      3.7
+// @description  分析Dofollow外链, AI分析页面内容, 支持链接跳转导航, 并可提交链接到外部系统. 修复了TrustedHTML并美化了UI, 新增每日提交计数和提交前存在性检查功能, 优化了提交和API密钥处理逻辑.
 // @author       23233 (由Gemini修改)
 // @match        *://*/*
 // @connect      entry.a0go.com
@@ -21,6 +21,7 @@
     // --- 全局变量和配置 ---
     const CUSTOM_BASE_URL = "http://entry.a0go.com:7544";
     const EXTERNAL_LINK_API_URL = "http://entry.a0go.com:6247/api/links/external";
+    const LINK_EXISTS_API_URL = "http://entry.a0go.com:6247/api/links/exists/url"; // 新增: 存在性检查API
     const MODEL_NAME = "gemini-2.5-pro";
     const DOFOLLOW_THRESHOLD = 5;
     let geminiApiKey = null, apiToken = null, dofollowLinks = [], currentLinkIndex = -1, isPageFullyLoaded = false;
@@ -175,7 +176,7 @@
         }
         runBtn.addEventListener('click', runAnalysis);
         const submitBtn = createSimpleElement('button', { id: 'show-submission-form-btn', className: 'action-btn btn-submit-link', textContent: '提交当前链接' });
-        submitBtn.addEventListener('click', displaySubmissionForm);
+        submitBtn.addEventListener('click', handleShowSubmissionFormClick); // [MODIFIED] 调用新的检查函数
         resultsDiv.appendChild(runBtn);
         resultsDiv.appendChild(submitBtn);
     }
@@ -294,8 +295,9 @@
             indicator.timeoutId = setTimeout(() => { currentIndicator = null; }, 600);
         });
     }
-    async function displaySubmissionForm() {
-        // [MODIFIED] 先检查token, 如果没有则展开设置, 不破坏现有UI
+
+    // [NEW] 点击“提交链接”按钮后的处理函数
+    async function handleShowSubmissionFormClick() {
         if (!apiToken) {
             settingsArea.style.display = 'block';
             apiTokenInput.focus();
@@ -303,6 +305,44 @@
             return;
         }
 
+        displayMessage(resultsDiv, '正在检查链接是否存在...', 'status-message');
+
+        GM_xmlhttpRequest({
+            method: "POST",
+            url: LINK_EXISTS_API_URL,
+            headers: { "Content-Type": "application/json" },
+            data: JSON.stringify({ url: window.location.href }),
+            onload: function(response) {
+                if (response.status >= 200 && response.status < 300) {
+                    try {
+                        const resData = JSON.parse(response.responseText);
+                        if (resData?.data?.exists === true) {
+                            displayMessage(resultsDiv, '提示：当前域名已收录。', 'status-message success-message');
+                            const backButton = createSimpleElement('button', { textContent: '返回', className: 'action-btn' });
+                            backButton.style.marginTop = '10px';
+                            backButton.style.backgroundColor = '#6c757d';
+                            backButton.addEventListener('click', setInitialState);
+                            resultsDiv.appendChild(backButton);
+                        } else {
+                            displaySubmissionForm(); // 链接不存在，显示表单
+                        }
+                    } catch (e) {
+                        console.error("Link Exists Check - Parsing Error:", e, "Raw Response:", response.responseText);
+                        displayMessage(resultsDiv, `检查失败: 无法解析服务器响应。<br>${e.message}`, 'error-message', true);
+                    }
+                } else {
+                    displayMessage(resultsDiv, `检查链接失败: ${response.status} - ${response.statusText}`, 'error-message');
+                }
+            },
+            onerror: function(error) {
+                console.error("Link Exists Check - XHR Error:", error);
+                displayMessage(resultsDiv, '检查链接错误: 无法连接到服务器。请检查控制台。', 'error-message');
+            }
+        });
+    }
+
+    async function displaySubmissionForm() {
+        // [MODIFIED] Token检查已移至 handleShowSubmissionFormClick
         clearElement(resultsDiv);
         const form = createSimpleElement('form', { id: 'link-submission-form' });
         form.noValidate = true;
@@ -393,7 +433,6 @@
                 if (response.status >= 200 && response.status < 300) {
                     try {
                         const resData = JSON.parse(response.responseText);
-                        // [MODIFIED] 使用可选链检查嵌套的action属性
                         if (resData?.data?.action === 'created') {
                             submissionCountData.count++;
                             await GM_setValue('SUBMISSION_COUNT_DATA', JSON.stringify(submissionCountData));
@@ -442,7 +481,7 @@
             const newKey = geminiApiKeyInput.value.trim();
             await GM_setValue('GEMINI_API_KEY', newKey);
             geminiApiKey = newKey;
-            geminiApiKeyInput.style.border = ''; // [MODIFIED] 移除红色边框
+            geminiApiKeyInput.style.border = '';
             saveGeminiKeyBtn.textContent = '已保存!';
             setTimeout(() => { saveGeminiKeyBtn.textContent = '保存Gemini Key'; }, 2000);
         });
@@ -451,7 +490,7 @@
             const newToken = apiTokenInput.value.trim();
             await GM_setValue('API_TOKEN', newToken);
             apiToken = newToken;
-            apiTokenInput.style.border = ''; // [MODIFIED] 移除红色边框
+            apiTokenInput.style.border = '';
             saveApiTokenBtn.textContent = '已保存!';
             setTimeout(() => { saveApiTokenBtn.textContent = '保存Token'; }, 2000);
         });
@@ -465,7 +504,6 @@
         });
     }
     async function runAnalysis() {
-        // [MODIFIED] 先检查key, 如果没有则展开设置, 不破坏现有UI
         if (!geminiApiKey) {
             settingsArea.style.display = 'block';
             geminiApiKeyInput.focus();
