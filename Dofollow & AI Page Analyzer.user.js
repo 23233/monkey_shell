@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         SEO页面内容分析器 (美化修复版)
 // @namespace    http://tampermonkey.net/
-// @version      3.4
-// @description  分析Dofollow外链, AI分析页面内容, 支持链接跳转导航, 并可提交链接到外部系统. 修复了TrustedHTML并美化了UI, 新增每日提交计数功能.
+// @version      3.6
+// @description  分析Dofollow外链, AI分析页面内容, 支持链接跳转导航, 并可提交链接到外部系统. 修复了TrustedHTML并美化了UI, 新增每日提交计数功能, 优化了提交和API密钥处理逻辑.
 // @author       23233 (由Gemini修改)
 // @match        *://*/*
 // @connect      entry.a0go.com
@@ -24,7 +24,6 @@
     const MODEL_NAME = "gemini-2.5-pro";
     const DOFOLLOW_THRESHOLD = 5;
     let geminiApiKey = null, apiToken = null, dofollowLinks = [], currentLinkIndex = -1, isPageFullyLoaded = false;
-    // [新增] 用于存储今日提交计数的数据对象
     let submissionCountData = { date: '', count: 0 };
 
 
@@ -44,7 +43,7 @@
         #ai-settings-btn { font-size: 20px; cursor: pointer; user-select: none; }
         #ai-settings-area { display: none; padding: 15px; background-color: #e9ecef; border-radius: 4px; }
         #ai-settings-area label { display: block; margin-bottom: 5px; font-weight: bold; font-size: 14px; }
-        #ai-settings-area input { width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; margin-bottom: 8px; }
+        #ai-settings-area input { width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; margin-bottom: 8px; transition: border-color 0.2s ease; }
         .settings-btn { width: 100%; padding: 8px; border-radius: 4px; border: none; color: white; cursor: pointer; margin-top: 5px; transition: background-color 0.2s ease; }
         #save-gemini-key-btn { background-color: #28a745; }
         #save-gemini-key-btn:hover { background-color: #218838; }
@@ -79,7 +78,6 @@
         #submit-link-btn:hover { background-color: #0069d9; }
         #cancel-submission-btn { background-color: #6c757d; }
         #cancel-submission-btn:hover { background-color: #5a6268; }
-        /* [新增] 提交计数器样式 */
         #submission-count-display { text-align: center; color: #666; font-size: 14px; margin-top: 15px; padding: 5px; background: #e9ecef; border-radius: 4px;}
     `);
 
@@ -124,7 +122,6 @@
     // --- UI 构建 ---
     function buildInitialPanel() {
         clearElement(panel);
-        // Header
         const header = createSimpleElement('div', { className: 'ai-analyzer-header' });
         const headerLeft = createSimpleElement('div', { className: 'header-left' });
         headerLeft.appendChild(createSimpleElement('h3', { textContent: '页面分析助手' }));
@@ -137,10 +134,8 @@
         settingsBtn = createSimpleElement('span', { id: 'ai-settings-btn', title: '设置', textContent: '⚙️' });
         header.appendChild(settingsBtn);
 
-        // Body
         resultsDiv = createSimpleElement('div', { id: 'ai-analyzer-results', className: 'ai-analyzer-body' });
 
-        // Settings
         settingsArea = createSimpleElement('div', { id: 'ai-settings-area' });
         const geminiDiv = createSimpleElement('div');
         geminiDiv.appendChild(createSimpleElement('label', { textContent: 'Gemini API Key:' })).htmlFor = 'gemini-api-key-input';
@@ -178,33 +173,25 @@
             runBtn.textContent = '分析 (加载中...)';
             runBtn.title = '等待页面完全加载...';
         }
-        runBtn.addEventListener('click', () => {
-            runBtn.style.display = 'none';
-            document.getElementById('show-submission-form-btn').style.display = 'none';
-            runAnalysis();
-        });
+        runBtn.addEventListener('click', runAnalysis);
         const submitBtn = createSimpleElement('button', { id: 'show-submission-form-btn', className: 'action-btn btn-submit-link', textContent: '提交当前链接' });
         submitBtn.addEventListener('click', displaySubmissionForm);
         resultsDiv.appendChild(runBtn);
         resultsDiv.appendChild(submitBtn);
     }
 
-    // [新增] 每日提交计数器核心函数
     async function loadAndCheckSubmissionCount() {
         const today = new Date().toISOString().split('T')[0];
         try {
             const storedData = JSON.parse(await GM_getValue('SUBMISSION_COUNT_DATA', '{}'));
-            // 检查存储的日期是否是今天
             if (storedData.date === today && typeof storedData.count === 'number') {
                 submissionCountData = storedData;
             } else {
-                // 如果不是今天或数据格式不对，则重置
                 submissionCountData = { date: today, count: 0 };
                 await GM_setValue('SUBMISSION_COUNT_DATA', JSON.stringify(submissionCountData));
             }
         } catch (e) {
             console.error("Error handling submission count data:", e);
-            // 出错时也进行重置，保证鲁棒性
             submissionCountData = { date: today, count: 0 };
             await GM_setValue('SUBMISSION_COUNT_DATA', JSON.stringify(submissionCountData));
         }
@@ -308,10 +295,11 @@
         });
     }
     async function displaySubmissionForm() {
+        // [MODIFIED] 先检查token, 如果没有则展开设置, 不破坏现有UI
         if (!apiToken) {
-            displayMessage(resultsDiv, "请先在设置中填写 'External Link API Token'!", 'error-message');
             settingsArea.style.display = 'block';
             apiTokenInput.focus();
+            apiTokenInput.style.border = '2px solid #d9534f';
             return;
         }
 
@@ -368,7 +356,6 @@
         actions.appendChild(cancelBtn);
         form.appendChild(actions);
 
-        // [修改] 在表单底部添加状态消息和计数器显示
         form.appendChild(createSimpleElement('div', { id: 'submission-status' }));
         form.appendChild(createSimpleElement('div', {
             id: 'submission-count-display',
@@ -402,19 +389,32 @@
             url: EXTERNAL_LINK_API_URL,
             headers: { "Content-Type": "application/json" },
             data: JSON.stringify(payload),
-            // [修改] 将onload函数改为async以使用await
             onload: async function(response) {
                 if (response.status >= 200 && response.status < 300) {
-                    // [修改] 提交成功后，更新计数器并保存
-                    submissionCountData.count++;
-                    await GM_setValue('SUBMISSION_COUNT_DATA', JSON.stringify(submissionCountData));
-
-                    statusDiv.className = 'status-message success-message';
-                    statusDiv.textContent = '提交成功!';
-                    // [修改] 同时更新界面上的计数显示
-                    document.getElementById('submission-count-display').textContent = `今日提交成功数量: ${submissionCountData.count}`;
-
-                    setTimeout(setInitialState, 2000);
+                    try {
+                        const resData = JSON.parse(response.responseText);
+                        // [MODIFIED] 使用可选链检查嵌套的action属性
+                        if (resData?.data?.action === 'created') {
+                            submissionCountData.count++;
+                            await GM_setValue('SUBMISSION_COUNT_DATA', JSON.stringify(submissionCountData));
+                            statusDiv.className = 'status-message success-message';
+                            statusDiv.textContent = '提交成功!';
+                            const countDisplay = document.getElementById('submission-count-display');
+                            if(countDisplay) {
+                                countDisplay.textContent = `今日提交成功数量: ${submissionCountData.count}`;
+                            }
+                            setTimeout(setInitialState, 2000);
+                        } else {
+                            statusDiv.className = 'status-message';
+                            statusDiv.textContent = '提示: 该链接已存在, 未重复添加.';
+                            setTimeout(setInitialState, 2500);
+                        }
+                    } catch (e) {
+                        console.error("Response Parsing Error:", e, "Raw Response:", response.responseText);
+                        statusDiv.className = 'error-message';
+                        statusDiv.textContent = '提交失败: 无法解析服务器响应。';
+                        submitBtn.disabled = false;
+                    }
                 } else {
                     statusDiv.className = 'error-message';
                     statusDiv.textContent = `提交失败: ${response.status} - ${response.responseText || '无服务器响应'}`;
@@ -442,6 +442,7 @@
             const newKey = geminiApiKeyInput.value.trim();
             await GM_setValue('GEMINI_API_KEY', newKey);
             geminiApiKey = newKey;
+            geminiApiKeyInput.style.border = ''; // [MODIFIED] 移除红色边框
             saveGeminiKeyBtn.textContent = '已保存!';
             setTimeout(() => { saveGeminiKeyBtn.textContent = '保存Gemini Key'; }, 2000);
         });
@@ -450,6 +451,7 @@
             const newToken = apiTokenInput.value.trim();
             await GM_setValue('API_TOKEN', newToken);
             apiToken = newToken;
+            apiTokenInput.style.border = ''; // [MODIFIED] 移除红色边框
             saveApiTokenBtn.textContent = '已保存!';
             setTimeout(() => { saveApiTokenBtn.textContent = '保存Token'; }, 2000);
         });
@@ -463,10 +465,11 @@
         });
     }
     async function runAnalysis() {
+        // [MODIFIED] 先检查key, 如果没有则展开设置, 不破坏现有UI
         if (!geminiApiKey) {
-            displayMessage(resultsDiv, '请先设置您的Gemini API Key!', 'error-message');
             settingsArea.style.display = 'block';
             geminiApiKeyInput.focus();
+            geminiApiKeyInput.style.border = '2px solid #d9534f';
             return;
         }
 
@@ -595,7 +598,6 @@
         setupLinkHoverIndicator();
     }
     async function initialize() {
-        // [修改] 在初始化时，首先加载并检查当天的提交计数
         await loadAndCheckSubmissionCount();
         buildInitialPanel();
         geminiApiKey = await GM_getValue('GEMINI_API_KEY', null);
