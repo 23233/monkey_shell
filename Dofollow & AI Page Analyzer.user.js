@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         SEO页面内容分析器 (美化修复版)
 // @namespace    http://tampermonkey.net/
-// @version      3.3
-// @description  分析Dofollow外链, AI分析页面内容, 支持链接跳转导航, 并可提交链接到外部系统. 修复了TrustedHTML并美化了UI.
+// @version      3.4
+// @description  分析Dofollow外链, AI分析页面内容, 支持链接跳转导航, 并可提交链接到外部系统. 修复了TrustedHTML并美化了UI, 新增每日提交计数功能.
 // @author       23233 (由Gemini修改)
 // @match        *://*/*
 // @connect      entry.a0go.com
@@ -24,6 +24,9 @@
     const MODEL_NAME = "gemini-2.5-pro";
     const DOFOLLOW_THRESHOLD = 5;
     let geminiApiKey = null, apiToken = null, dofollowLinks = [], currentLinkIndex = -1, isPageFullyLoaded = false;
+    // [新增] 用于存储今日提交计数的数据对象
+    let submissionCountData = { date: '', count: 0 };
+
 
     // --- 样式注入 (美化更新) ---
     GM_addStyle(`
@@ -76,6 +79,8 @@
         #submit-link-btn:hover { background-color: #0069d9; }
         #cancel-submission-btn { background-color: #6c757d; }
         #cancel-submission-btn:hover { background-color: #5a6268; }
+        /* [新增] 提交计数器样式 */
+        #submission-count-display { text-align: center; color: #666; font-size: 14px; margin-top: 15px; padding: 5px; background: #e9ecef; border-radius: 4px;}
     `);
 
     // --- DOM 元素 ---
@@ -91,13 +96,14 @@
 
     // --- DOM 操作工具函数 ---
     const clearElement = (el) => { while (el.firstChild) el.removeChild(el.firstChild); };
-    const createSimpleElement = (tag, { id, className, textContent, title, type } = {}) => {
+    const createSimpleElement = (tag, { id, className, textContent, title, type, style } = {}) => {
         const el = document.createElement(tag);
         if (id) el.id = id;
         if (className) el.className = className;
         if (textContent) el.textContent = textContent;
         if (title) el.title = title;
         if (type) el.type = type;
+        if (style) el.style.cssText = style;
         return el;
     };
     const displayMessage = (container, message, className, allowHtml = false) => {
@@ -162,10 +168,7 @@
     // --- 核心逻辑 ---
     function setInitialState() {
         clearElement(resultsDiv);
-
-        // **样式修改点**：使用新的CSS类来定义按钮样式
         const runBtn = createSimpleElement('button', { id: 'run-analysis-btn', className: 'action-btn btn-analyze' });
-
         if (isPageFullyLoaded) {
             runBtn.disabled = false;
             runBtn.textContent = '手动分析当前页面';
@@ -176,27 +179,39 @@
             runBtn.title = '等待页面完全加载...';
         }
         runBtn.addEventListener('click', () => {
-            runBtn.style.display = 'none'; // 直接隐藏自己
+            runBtn.style.display = 'none';
             document.getElementById('show-submission-form-btn').style.display = 'none';
             runAnalysis();
         });
-
-        // **样式修改点**：使用新的CSS类来定义按钮样式
         const submitBtn = createSimpleElement('button', { id: 'show-submission-form-btn', className: 'action-btn btn-submit-link', textContent: '提交当前链接' });
         submitBtn.addEventListener('click', displaySubmissionForm);
-
         resultsDiv.appendChild(runBtn);
         resultsDiv.appendChild(submitBtn);
     }
 
-    // [其余所有函数保持不变]
-    // ...
-    // ...
-    // ... (此处省略所有其他未改动的函数，以节省篇幅)
-    // ...
-    // ...
-    // --- 其他函数 (大部分保持不变) ---
-    function scanAndPrepareDofollowLinks() { /* ... 内容不变 ... */
+    // [新增] 每日提交计数器核心函数
+    async function loadAndCheckSubmissionCount() {
+        const today = new Date().toISOString().split('T')[0];
+        try {
+            const storedData = JSON.parse(await GM_getValue('SUBMISSION_COUNT_DATA', '{}'));
+            // 检查存储的日期是否是今天
+            if (storedData.date === today && typeof storedData.count === 'number') {
+                submissionCountData = storedData;
+            } else {
+                // 如果不是今天或数据格式不对，则重置
+                submissionCountData = { date: today, count: 0 };
+                await GM_setValue('SUBMISSION_COUNT_DATA', JSON.stringify(submissionCountData));
+            }
+        } catch (e) {
+            console.error("Error handling submission count data:", e);
+            // 出错时也进行重置，保证鲁棒性
+            submissionCountData = { date: today, count: 0 };
+            await GM_setValue('SUBMISSION_COUNT_DATA', JSON.stringify(submissionCountData));
+        }
+    }
+
+
+    function scanAndPrepareDofollowLinks() {
         dofollowLinks = [];
         currentLinkIndex = -1;
         const currentHostname = window.location.hostname;
@@ -219,7 +234,7 @@
         const navControls = document.getElementById('dofollow-nav-controls');
         if(navControls) navControls.style.display = dofollowCount > 0 ? 'inline-block' : 'none';
     }
-    function navigateToDofollowLink(direction) { /* ... 内容不变 ... */
+    function navigateToDofollowLink(direction) {
         if (dofollowLinks.length === 0) return;
         if (dofollowLinks[currentLinkIndex]) {
             dofollowLinks[currentLinkIndex].classList.remove('highlighted-dofollow-link');
@@ -236,7 +251,7 @@
             setTimeout(() => targetLink.classList.remove('highlighted-dofollow-link'), 2000);
         }
     }
-    function showIndicatorForLink(link, duration) { /* ... 内容不变 ... */
+    function showIndicatorForLink(link, duration) {
         const isNofollow = link.rel && link.rel.toLowerCase().includes('nofollow');
         const indicatorText = isNofollow ? 'NoF' : 'F';
         const indicatorColor = isNofollow ? '#d9534f' : '#28a745';
@@ -257,7 +272,7 @@
         setTimeout(() => indicator.remove(), duration);
         return indicator;
     }
-    function setupIntersectionObserverForLinks() { /* ... 内容不变 ... */
+    function setupIntersectionObserverForLinks() {
         const currentHostname = window.location.hostname;
         const observer = new IntersectionObserver((entries, obs) => {
             entries.forEach(entry => {
@@ -275,7 +290,7 @@
             } catch (e) { /* 忽略无效URL */ }
         });
     }
-    function setupLinkHoverIndicator() { /* ... 内容不变 ... */
+    function setupLinkHoverIndicator() {
         const currentHostname = window.location.hostname;
         document.body.addEventListener('mouseover', event => {
             const link = event.target.closest('a[href]');
@@ -292,7 +307,7 @@
             indicator.timeoutId = setTimeout(() => { currentIndicator = null; }, 600);
         });
     }
-    async function displaySubmissionForm() { /* ... 内容不变 ... */
+    async function displaySubmissionForm() {
         if (!apiToken) {
             displayMessage(resultsDiv, "请先在设置中填写 'External Link API Token'!", 'error-message');
             settingsArea.style.display = 'block';
@@ -353,11 +368,17 @@
         actions.appendChild(cancelBtn);
         form.appendChild(actions);
 
+        // [修改] 在表单底部添加状态消息和计数器显示
         form.appendChild(createSimpleElement('div', { id: 'submission-status' }));
+        form.appendChild(createSimpleElement('div', {
+            id: 'submission-count-display',
+            textContent: `今日提交成功数量: ${submissionCountData.count}`
+        }));
+
         form.addEventListener('submit', handleFormSubmission);
         resultsDiv.appendChild(form);
     }
-    async function handleFormSubmission(event) { /* ... 内容不变 ... */
+    async function handleFormSubmission(event) {
         event.preventDefault();
         const statusDiv = document.getElementById('submission-status');
         const submitBtn = document.getElementById('submit-link-btn');
@@ -381,10 +402,18 @@
             url: EXTERNAL_LINK_API_URL,
             headers: { "Content-Type": "application/json" },
             data: JSON.stringify(payload),
-            onload: function(response) {
+            // [修改] 将onload函数改为async以使用await
+            onload: async function(response) {
                 if (response.status >= 200 && response.status < 300) {
+                    // [修改] 提交成功后，更新计数器并保存
+                    submissionCountData.count++;
+                    await GM_setValue('SUBMISSION_COUNT_DATA', JSON.stringify(submissionCountData));
+
                     statusDiv.className = 'status-message success-message';
                     statusDiv.textContent = '提交成功!';
+                    // [修改] 同时更新界面上的计数显示
+                    document.getElementById('submission-count-display').textContent = `今日提交成功数量: ${submissionCountData.count}`;
+
                     setTimeout(setInitialState, 2000);
                 } else {
                     statusDiv.className = 'error-message';
@@ -400,7 +429,7 @@
             }
         });
     }
-    function setupEventListeners() { /* ... 内容不变 ... */
+    function setupEventListeners() {
         toggleButton.addEventListener('click', () => {
             panel.style.display = panel.style.display === 'flex' ? 'none' : 'flex';
         });
@@ -433,7 +462,7 @@
             }
         });
     }
-    async function runAnalysis() { /* ... 内容不变 ... */
+    async function runAnalysis() {
         if (!geminiApiKey) {
             displayMessage(resultsDiv, '请先设置您的Gemini API Key!', 'error-message');
             settingsArea.style.display = 'block';
@@ -458,7 +487,7 @@
         displayMessage(resultsDiv, `检测到 ${dofollowCount} 个Dofollow外链，正在请求AI分析页面...`, 'status-message');
         callAiApi(dofollowCount > 0, geminiApiKey);
     }
-    function callAiApi(hasDofollow, currentApiKey) { /* ... 内容不变 ... */
+    function callAiApi(hasDofollow, currentApiKey) {
         const pageHtml = document.documentElement.outerHTML;
         const prompt = `
             You are an expert webpage analyzer. Your task is to analyze the provided HTML content and return a specific JSON object.
@@ -504,7 +533,7 @@
             }
         });
     }
-    function displayResultsTable(aiData, hasDofollow) { /* ... 内容不变 ... */
+    function displayResultsTable(aiData, hasDofollow) {
         clearElement(resultsDiv);
         const table = createSimpleElement('table', { id: 'ai-results-table' });
         const thead = createSimpleElement('thead');
@@ -542,7 +571,7 @@
         restartBtn.addEventListener('click', setInitialState);
         resultsDiv.appendChild(restartBtn);
     }
-    function copyTableToClipboard() { /* ... 内容不变 ... */
+    function copyTableToClipboard() {
         const table = document.getElementById('ai-results-table');
         if (!table) return;
         let text = Array.from(table.querySelectorAll('tr')).map(row =>
@@ -553,7 +582,7 @@
         GM_setClipboard(text.trim());
         alert('表格内容已复制到剪贴板！');
     }
-    function onPageFullyLoaded() { /* ... 内容不变 ... */
+    function onPageFullyLoaded() {
         isPageFullyLoaded = true;
         const analysisBtn = document.getElementById('run-analysis-btn');
         if (analysisBtn) {
@@ -565,7 +594,9 @@
         setupIntersectionObserverForLinks();
         setupLinkHoverIndicator();
     }
-    async function initialize() { /* ... 内容不变 ... */
+    async function initialize() {
+        // [修改] 在初始化时，首先加载并检查当天的提交计数
+        await loadAndCheckSubmissionCount();
         buildInitialPanel();
         geminiApiKey = await GM_getValue('GEMINI_API_KEY', null);
         apiToken = await GM_getValue('API_TOKEN', null);
