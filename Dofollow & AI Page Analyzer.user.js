@@ -1,9 +1,9 @@
 // ==UserScript==
-// @name         SEO页面内容分析器
+// @name         SEO页面内容分析器 (美化修复版)
 // @namespace    http://tampermonkey.net/
 // @version      3.3
 // @description  分析Dofollow外链, AI分析页面内容, 支持链接跳转导航, 并可提交链接到外部系统. 修复了TrustedHTML并美化了UI.
-// @author       23233
+// @author       23233 (由Gemini修改)
 // @match        *://*/*
 // @connect      entry.a0go.com
 // @grant        GM_addStyle
@@ -369,7 +369,7 @@
             token: apiToken,
             full_url: window.location.href,
             as: parseInt(document.getElementById('form-as').value, 10) || 0,
-            dr: parseInt(document.getElementById('dr').value, 10) || 0,
+            dr: parseInt(document.getElementById('form-dr').value, 10) || 0,
             need_login: document.getElementById('form-need-login').checked,
             has_capture: document.getElementById('form-has-capture').checked,
             capture_type: document.getElementById('form-capture-type').value.trim(),
