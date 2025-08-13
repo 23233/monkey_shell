@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         SEO页面内容分析器
 // @namespace    http://tampermonkey.net/
-// @version      3.0
-// @description  分析Dofollow外链, AI分析页面内容, 支持链接跳转导航, 并可提交链接到外部系统.
+// @version      3.3
+// @description  分析Dofollow外链, AI分析页面内容, 支持链接跳转导航, 并可提交链接到外部系统. 修复了TrustedHTML并美化了UI.
 // @author       23233
 // @match        *://*/*
 // @connect      entry.a0go.com
@@ -16,68 +16,45 @@
 (async function() {
     'use strict';
 
-    // 如果在iframe中运行，则直接终止脚本
-    if (window.self !== window.top) {
-        return;
-    }
+    if (window.self !== window.top) return;
 
     // --- 全局变量和配置 ---
     const CUSTOM_BASE_URL = "http://entry.a0go.com:7544";
     const EXTERNAL_LINK_API_URL = "http://entry.a0go.com:6247/api/links/external";
     const MODEL_NAME = "gemini-2.5-pro";
     const DOFOLLOW_THRESHOLD = 5;
-    let geminiApiKey = null; // 用于AI分析的Key
-    let apiToken = null; // 用于提交链接的Token
-    let dofollowLinks = []; // 存储页面上所有Dofollow链接的元素
-    let currentLinkIndex = -1; // 当前导航到的链接索引
+    let geminiApiKey = null, apiToken = null, dofollowLinks = [], currentLinkIndex = -1, isPageFullyLoaded = false;
 
-    // --- 注入UI样式 ---
+    // --- 样式注入 (美化更新) ---
     GM_addStyle(`
-        #ai-analyzer-toggle-btn {
-            position: fixed; bottom: 20px; right: 30px;
-            min-width: 40px; height: 40px; padding: 0 12px;
-            background-color: #007bff; color: white; border: none;
-            border-radius: 20px;
-            font-size: 18px; font-weight: bold; cursor: pointer;
-            z-index: 100000;
-            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
-            display: flex; justify-content: center; align-items: center;
-            line-height: 40px;
-        }
-        #ai-analyzer-panel {
-            position: fixed; bottom: 80px; right: 20px; width: 450px; max-height: 600px;
-            background-color: #f9f9f9; border: 1px solid #ccc; border-radius: 8px;
-            z-index: 9999; box-shadow: 0 4px 12px rgba(0,0,0,0.15); display: none;
-            flex-direction: column; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-        }
-        .ai-analyzer-header {
-            padding: 10px 15px; background-color: #f1f1f1; border-bottom: 1px solid #ddd;
-            display: flex; justify-content: space-between; align-items: center; cursor: move;
-        }
+        #ai-analyzer-toggle-btn { position: fixed; bottom: 20px; right: 30px; min-width: 40px; height: 40px; padding: 0 12px; background-color: #007bff; color: white; border: none; border-radius: 20px; font-size: 18px; font-weight: bold; cursor: pointer; z-index: 100000; box-shadow: 0 4px 8px rgba(0,0,0,0.2); display: flex; justify-content: center; align-items: center; line-height: 40px; }
+        #ai-analyzer-panel { position: fixed; bottom: 80px; right: 20px; width: 450px; max-height: 600px; background-color: #f9f9f9; border: 1px solid #ccc; border-radius: 8px; z-index: 9999; box-shadow: 0 4px 12px rgba(0,0,0,0.15); display: none; flex-direction: column; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+        .ai-analyzer-header { padding: 10px 15px; background-color: #f1f1f1; border-bottom: 1px solid #ddd; display: flex; justify-content: space-between; align-items: center; cursor: move; }
         .header-left { display: flex; align-items: center; }
         .ai-analyzer-header h3 { margin: 0; font-size: 16px; color: #333; }
         #external-link-counter { font-size: 14px; color: #555; margin-left: 10px; font-weight: normal; }
-        #dofollow-nav-controls { margin-left: 8px; display: inline-block; }
+        #dofollow-nav-controls { margin-left: 8px; display: none; }
         .dofollow-nav-arrow { font-size: 16px; cursor: pointer; user-select: none; padding: 0 4px; color: #333; font-weight: bold; }
         .dofollow-nav-arrow:hover { color: #007bff; }
-        .highlighted-dofollow-link {
-            outline: 3px solid #007bff !important;
-            box-shadow: 0 0 15px rgba(0, 123, 255, 0.7) !important;
-            border-radius: 3px;
-            transition: outline 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
-        }
-        .ai-analyzer-body { padding: 15px; overflow-y: auto; color: #333; }
+        .highlighted-dofollow-link { outline: 3px solid #007bff !important; box-shadow: 0 0 15px rgba(0, 123, 255, 0.7) !important; border-radius: 3px; transition: outline 0.2s ease-in-out, box-shadow 0.2s ease-in-out; }
+        .ai-analyzer-body { padding: 15px; overflow-y: auto; color: #333; flex-grow: 1; }
         #ai-settings-btn { font-size: 20px; cursor: pointer; user-select: none; }
         #ai-settings-area { display: none; padding: 15px; background-color: #e9ecef; border-radius: 4px; }
         #ai-settings-area label { display: block; margin-bottom: 5px; font-weight: bold; font-size: 14px; }
         #ai-settings-area input { width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; margin-bottom: 8px; }
-        .settings-btn { width: 100%; padding: 8px; border-radius: 4px; border: none; color: white; cursor: pointer; margin-top: 5px; }
+        .settings-btn { width: 100%; padding: 8px; border-radius: 4px; border: none; color: white; cursor: pointer; margin-top: 5px; transition: background-color 0.2s ease; }
         #save-gemini-key-btn { background-color: #28a745; }
+        #save-gemini-key-btn:hover { background-color: #218838; }
         #save-api-token-btn { background-color: #17a2b8; }
-        .action-btn { width: 100%; padding: 12px; font-size: 16px; font-weight: bold; cursor: pointer; color: white; border: none; border-radius: 5px; margin-bottom: 10px; }
-        #run-analysis-btn { background-color: #28a745; }
-        #show-submission-form-btn { background-color: #007bff; }
-        #copy-table-btn { background-color: #007bff; color: white; border: none; padding: 8px 12px; border-radius: 4px; cursor: pointer; margin-top: 15px; float: right; }
+        #save-api-token-btn:hover { background-color: #117a8b; }
+        .action-btn { width: 100%; padding: 12px; font-size: 16px; font-weight: bold; cursor: pointer; color: white; border: none; border-radius: 5px; margin-bottom: 10px; transition: background-color 0.2s ease; }
+        .action-btn:disabled { background-color: #6c757d; cursor: not-allowed; opacity: 0.7; }
+        .btn-analyze { background-color: #28a745; } /* Green */
+        .btn-analyze:hover:not(:disabled) { background-color: #218838; }
+        .btn-submit-link { background-color: #007bff; } /* Blue */
+        .btn-submit-link:hover:not(:disabled) { background-color: #0069d9; }
+        #copy-table-btn { background-color: #007bff; color: white; border: none; padding: 8px 12px; border-radius: 4px; cursor: pointer; margin-top: 15px; float: right; transition: background-color 0.2s ease; }
+        #copy-table-btn:hover { background-color: #0069d9; }
         .status-message { font-style: italic; color: #666; margin-top: 10px; }
         .success-message { color: #28a745; font-weight: bold; }
         .error-message { color: #d9534f; font-weight: bold; white-space: pre-wrap; word-wrap: break-word; }
@@ -86,8 +63,6 @@
         #ai-analyzer-panel th { background-color: #f2f2f2; font-weight: bold; }
         .link-follow-indicator { position: fixed; background-color: rgba(0, 0, 0, 0.75); color: white; padding: 2px 5px; border-radius: 3px; font-size: 12px; z-index: 10001; pointer-events: none; opacity: 0; transform: translateY(10px); animation: dofollow-fade-in-up 0.4s ease-out forwards; }
         @keyframes dofollow-fade-in-up { to { opacity: 1; transform: translateY(0); } }
-
-        /* 新增: 表单样式 */
         #link-submission-form h4 { text-align: center; margin-top: 0; margin-bottom: 15px; color: #333; }
         .form-url-display { font-size: 12px; color: #666; word-break: break-all; background: #eee; padding: 5px; border-radius: 3px; margin-bottom: 10px; text-align: center; }
         .form-group { margin-bottom: 12px; display: flex; align-items: center; }
@@ -96,60 +71,132 @@
         .form-checkbox-group { display: flex; align-items: center; margin-bottom: 12px; }
         .form-checkbox-group label { margin-left: 8px; user-select: none; }
         .form-actions { display: flex; justify-content: space-between; margin-top: 20px; }
-        .form-actions button { width: 48%; padding: 10px; border-radius: 5px; border: none; color: white; font-size: 15px; cursor: pointer; }
+        .form-actions button { width: 48%; padding: 10px; border-radius: 5px; border: none; color: white; font-size: 15px; cursor: pointer; transition: background-color 0.2s ease; }
         #submit-link-btn { background-color: #007bff; }
+        #submit-link-btn:hover { background-color: #0069d9; }
         #cancel-submission-btn { background-color: #6c757d; }
+        #cancel-submission-btn:hover { background-color: #5a6268; }
     `);
 
-    // --- 创建UI元素 ---
+    // --- DOM 元素 ---
     const panel = document.createElement('div');
     panel.id = 'ai-analyzer-panel';
     const toggleButton = document.createElement('button');
     toggleButton.id = 'ai-analyzer-toggle-btn';
-    toggleButton.textContent = '0';
+    toggleButton.textContent = '?';
     document.body.appendChild(toggleButton);
-
-    panel.innerHTML = `
-        <div class="ai-analyzer-header">
-            <div class="header-left">
-                 <h3>页面分析助手</h3>
-                 <span id="external-link-counter" title="页面Dofollow外链数量"></span>
-                 <span id="dofollow-nav-controls" style="display: none;">
-                    <span id="dofollow-nav-up" class="dofollow-nav-arrow" title="上一个Dofollow链接">▲</span>
-                    <span id="dofollow-nav-down" class="dofollow-nav-arrow" title="下一个Dofollow链接">▼</span>
-                 </span>
-            </div>
-            <span id="ai-settings-btn" title="设置">⚙️</span>
-        </div>
-        <div class="ai-analyzer-body" id="ai-analyzer-results"></div>
-        <div id="ai-settings-area">
-            <div>
-                <label for="gemini-api-key-input">Gemini API Key:</label>
-                <input type="password" id="gemini-api-key-input" placeholder="用于AI分析的Gemini sk-密钥">
-                <button id="save-gemini-key-btn" class="settings-btn">保存Gemini Key</button>
-            </div>
-            <hr style="margin: 15px 0; border: 0; border-top: 1px solid #ccc;">
-            <div>
-                <label for="api-token-input">External Link API Token:</label>
-                <input type="password" id="api-token-input" placeholder="用于提交外链的Token">
-                <button id="save-api-token-btn" class="settings-btn">保存Token</button>
-            </div>
-        </div>
-    `;
     document.body.appendChild(panel);
 
-    const resultsDiv = document.getElementById('ai-analyzer-results');
-    const settingsBtn = document.getElementById('ai-settings-btn');
-    const settingsArea = document.getElementById('ai-settings-area');
-    const geminiApiKeyInput = document.getElementById('gemini-api-key-input');
-    const apiTokenInput = document.getElementById('api-token-input');
-    const saveGeminiKeyBtn = document.getElementById('save-gemini-key-btn');
-    const saveApiTokenBtn = document.getElementById('save-api-token-btn');
-    let currentIndicator = null;
+    let resultsDiv, settingsBtn, settingsArea, geminiApiKeyInput, apiTokenInput, saveGeminiKeyBtn, saveApiTokenBtn, currentIndicator = null;
 
-    // --- 功能函数 ---
+    // --- DOM 操作工具函数 ---
+    const clearElement = (el) => { while (el.firstChild) el.removeChild(el.firstChild); };
+    const createSimpleElement = (tag, { id, className, textContent, title, type } = {}) => {
+        const el = document.createElement(tag);
+        if (id) el.id = id;
+        if (className) el.className = className;
+        if (textContent) el.textContent = textContent;
+        if (title) el.title = title;
+        if (type) el.type = type;
+        return el;
+    };
+    const displayMessage = (container, message, className, allowHtml = false) => {
+        clearElement(container);
+        const p = createSimpleElement('p', { className });
+        if (allowHtml) {
+            const parts = message.split('<br>');
+            parts.forEach((part, index) => {
+                p.appendChild(document.createTextNode(part));
+                if (index < parts.length - 1) p.appendChild(createSimpleElement('br'));
+            });
+        } else {
+            p.textContent = message;
+        }
+        container.appendChild(p);
+    };
 
-    function scanAndPrepareDofollowLinks() {
+    // --- UI 构建 ---
+    function buildInitialPanel() {
+        clearElement(panel);
+        // Header
+        const header = createSimpleElement('div', { className: 'ai-analyzer-header' });
+        const headerLeft = createSimpleElement('div', { className: 'header-left' });
+        headerLeft.appendChild(createSimpleElement('h3', { textContent: '页面分析助手' }));
+        headerLeft.appendChild(createSimpleElement('span', { id: 'external-link-counter', title: '页面Dofollow外链数量' }));
+        const navControls = createSimpleElement('span', { id: 'dofollow-nav-controls' });
+        navControls.appendChild(createSimpleElement('span', { id: 'dofollow-nav-up', className: 'dofollow-nav-arrow', title: '上一个Dofollow链接', textContent: '▲' }));
+        navControls.appendChild(createSimpleElement('span', { id: 'dofollow-nav-down', className: 'dofollow-nav-arrow', title: '下一个Dofollow链接', textContent: '▼' }));
+        headerLeft.appendChild(navControls);
+        header.appendChild(headerLeft);
+        settingsBtn = createSimpleElement('span', { id: 'ai-settings-btn', title: '设置', textContent: '⚙️' });
+        header.appendChild(settingsBtn);
+
+        // Body
+        resultsDiv = createSimpleElement('div', { id: 'ai-analyzer-results', className: 'ai-analyzer-body' });
+
+        // Settings
+        settingsArea = createSimpleElement('div', { id: 'ai-settings-area' });
+        const geminiDiv = createSimpleElement('div');
+        geminiDiv.appendChild(createSimpleElement('label', { textContent: 'Gemini API Key:' })).htmlFor = 'gemini-api-key-input';
+        geminiApiKeyInput = createSimpleElement('input', { id: 'gemini-api-key-input', type: 'password', title: '用于AI分析的Gemini sk-密钥' });
+        geminiApiKeyInput.placeholder = '用于AI分析的Gemini sk-密钥';
+        geminiDiv.appendChild(geminiApiKeyInput);
+        saveGeminiKeyBtn = createSimpleElement('button', { id: 'save-gemini-key-btn', className: 'settings-btn', textContent: '保存Gemini Key' });
+        geminiDiv.appendChild(saveGeminiKeyBtn);
+        settingsArea.appendChild(geminiDiv);
+        settingsArea.appendChild(Object.assign(document.createElement('hr'), { style: 'margin: 15px 0; border: 0; border-top: 1px solid #ccc;' }));
+        const tokenDiv = createSimpleElement('div');
+        tokenDiv.appendChild(createSimpleElement('label', { textContent: 'External Link API Token:' })).htmlFor = 'api-token-input';
+        apiTokenInput = createSimpleElement('input', { id: 'api-token-input', type: 'password', title: '用于提交外链的Token' });
+        apiTokenInput.placeholder = '用于提交外链的Token';
+        tokenDiv.appendChild(apiTokenInput);
+        saveApiTokenBtn = createSimpleElement('button', { id: 'save-api-token-btn', className: 'settings-btn', textContent: '保存Token' });
+        tokenDiv.appendChild(saveApiTokenBtn);
+        settingsArea.appendChild(tokenDiv);
+
+        panel.appendChild(header);
+        panel.appendChild(resultsDiv);
+        panel.appendChild(settingsArea);
+    }
+
+    // --- 核心逻辑 ---
+    function setInitialState() {
+        clearElement(resultsDiv);
+
+        // **样式修改点**：使用新的CSS类来定义按钮样式
+        const runBtn = createSimpleElement('button', { id: 'run-analysis-btn', className: 'action-btn btn-analyze' });
+
+        if (isPageFullyLoaded) {
+            runBtn.disabled = false;
+            runBtn.textContent = '手动分析当前页面';
+            runBtn.title = '开始分析页面内容和外链';
+        } else {
+            runBtn.disabled = true;
+            runBtn.textContent = '分析 (加载中...)';
+            runBtn.title = '等待页面完全加载...';
+        }
+        runBtn.addEventListener('click', () => {
+            runBtn.style.display = 'none'; // 直接隐藏自己
+            document.getElementById('show-submission-form-btn').style.display = 'none';
+            runAnalysis();
+        });
+
+        // **样式修改点**：使用新的CSS类来定义按钮样式
+        const submitBtn = createSimpleElement('button', { id: 'show-submission-form-btn', className: 'action-btn btn-submit-link', textContent: '提交当前链接' });
+        submitBtn.addEventListener('click', displaySubmissionForm);
+
+        resultsDiv.appendChild(runBtn);
+        resultsDiv.appendChild(submitBtn);
+    }
+
+    // [其余所有函数保持不变]
+    // ...
+    // ...
+    // ... (此处省略所有其他未改动的函数，以节省篇幅)
+    // ...
+    // ...
+    // --- 其他函数 (大部分保持不变) ---
+    function scanAndPrepareDofollowLinks() { /* ... 内容不变 ... */
         dofollowLinks = [];
         currentLinkIndex = -1;
         const currentHostname = window.location.hostname;
@@ -166,12 +213,13 @@
             } catch (e) { /* 忽略无效URL */ }
         });
         const dofollowCount = dofollowLinks.length;
-        document.getElementById('external-link-counter').textContent = `(Dofollow: ${dofollowCount})`;
+        const counter = document.getElementById('external-link-counter');
+        if(counter) counter.textContent = `(Dofollow: ${dofollowCount})`;
         toggleButton.textContent = dofollowCount;
-        document.getElementById('dofollow-nav-controls').style.display = dofollowCount > 0 ? 'inline-block' : 'none';
+        const navControls = document.getElementById('dofollow-nav-controls');
+        if(navControls) navControls.style.display = dofollowCount > 0 ? 'inline-block' : 'none';
     }
-
-    function navigateToDofollowLink(direction) {
+    function navigateToDofollowLink(direction) { /* ... 内容不变 ... */
         if (dofollowLinks.length === 0) return;
         if (dofollowLinks[currentLinkIndex]) {
             dofollowLinks[currentLinkIndex].classList.remove('highlighted-dofollow-link');
@@ -188,8 +236,7 @@
             setTimeout(() => targetLink.classList.remove('highlighted-dofollow-link'), 2000);
         }
     }
-
-    function showIndicatorForLink(link, duration) {
+    function showIndicatorForLink(link, duration) { /* ... 内容不变 ... */
         const isNofollow = link.rel && link.rel.toLowerCase().includes('nofollow');
         const indicatorText = isNofollow ? 'NoF' : 'F';
         const indicatorColor = isNofollow ? '#d9534f' : '#28a745';
@@ -210,8 +257,7 @@
         setTimeout(() => indicator.remove(), duration);
         return indicator;
     }
-
-    function setupIntersectionObserverForLinks() {
+    function setupIntersectionObserverForLinks() { /* ... 内容不变 ... */
         const currentHostname = window.location.hostname;
         const observer = new IntersectionObserver((entries, obs) => {
             entries.forEach(entry => {
@@ -229,8 +275,7 @@
             } catch (e) { /* 忽略无效URL */ }
         });
     }
-
-    function setupLinkHoverIndicator() {
+    function setupLinkHoverIndicator() { /* ... 内容不变 ... */
         const currentHostname = window.location.hostname;
         document.body.addEventListener('mouseover', event => {
             const link = event.target.closest('a[href]');
@@ -247,57 +292,72 @@
             indicator.timeoutId = setTimeout(() => { currentIndicator = null; }, 600);
         });
     }
-
-    // --- 新增：提交链接表单 ---
-    async function displaySubmissionForm() {
+    async function displaySubmissionForm() { /* ... 内容不变 ... */
         if (!apiToken) {
-            resultsDiv.innerHTML = `<p class="error-message">请先在设置中填写 'External Link API Token'!</p>`;
+            displayMessage(resultsDiv, "请先在设置中填写 'External Link API Token'!", 'error-message');
             settingsArea.style.display = 'block';
-            document.getElementById('api-token-input').focus();
+            apiTokenInput.focus();
             return;
         }
 
-        resultsDiv.innerHTML = `
-            <form id="link-submission-form" novalidate>
-                <h4>提交当前页面链接</h4>
-                <p class="form-url-display">URL: ${window.location.href}</p>
-                <div class="form-group">
-                    <label for="form-as">AS:</label>
-                    <input type="number" id="form-as" class="form-input" value="0" min="0">
-                </div>
-                <div class="form-group">
-                    <label for="form-dr">DR:</label>
-                    <input type="number" id="form-dr" class="form-input" value="0" min="0">
-                </div>
-                <div class="form-checkbox-group">
-                    <input type="checkbox" id="form-need-login">
-                    <label for="form-need-login">需要登录 (Need Login)</label>
-                </div>
-                <div class="form-checkbox-group">
-                    <input type="checkbox" id="form-has-capture">
-                    <label for="form-has-capture">有验证码 (Has Capture)</label>
-                </div>
-                <div class="form-group">
-                    <label for="form-capture-type">验证码类型:</label>
-                    <input type="text" id="form-capture-type" class="form-input" placeholder="例如: reCAPTCHA">
-                </div>
-                <div class="form-group">
-                    <label for="form-remarks">备注:</label>
-                    <textarea id="form-remarks" class="form-input" rows="3" maxlength="2000"></textarea>
-                </div>
-                <div class="form-actions">
-                     <button type="submit" id="submit-link-btn">确认提交</button>
-                     <button type="button" id="cancel-submission-btn">取消</button>
-                </div>
-                <div id="submission-status"></div>
-            </form>
-        `;
+        clearElement(resultsDiv);
+        const form = createSimpleElement('form', { id: 'link-submission-form' });
+        form.noValidate = true;
 
-        document.getElementById('link-submission-form').addEventListener('submit', handleFormSubmission);
-        document.getElementById('cancel-submission-btn').addEventListener('click', setInitialState);
+        form.appendChild(createSimpleElement('h4', { textContent: '提交当前页面链接' }));
+        form.appendChild(createSimpleElement('p', { className: 'form-url-display', textContent: `URL: ${window.location.href}` }));
+
+        const createFormGroup = (label, input) => {
+            const group = createSimpleElement('div', { className: 'form-group' });
+            const lbl = createSimpleElement('label', { textContent: label });
+            lbl.htmlFor = input.id;
+            group.appendChild(lbl);
+            group.appendChild(input);
+            return group;
+        };
+
+        const asInput = createSimpleElement('input', { id: 'form-as', className: 'form-input', type: 'number', title: 'AS' });
+        asInput.value = "0"; asInput.min = "0";
+        form.appendChild(createFormGroup('AS:', asInput));
+
+        const drInput = createSimpleElement('input', { id: 'form-dr', className: 'form-input', type: 'number', title: 'DR' });
+        drInput.value = "0"; drInput.min = "0";
+        form.appendChild(createFormGroup('DR:', drInput));
+
+        const createCheckbox = (id, labelText) => {
+            const group = createSimpleElement('div', { className: 'form-checkbox-group' });
+            const chk = createSimpleElement('input', { id, type: 'checkbox' });
+            const lbl = createSimpleElement('label', { textContent: labelText });
+            lbl.htmlFor = id;
+            group.appendChild(chk);
+            group.appendChild(lbl);
+            return group;
+        };
+
+        form.appendChild(createCheckbox('form-need-login', '需要登录 (Need Login)'));
+        form.appendChild(createCheckbox('form-has-capture', '有验证码 (Has Capture)'));
+
+        const captureTypeInput = createSimpleElement('input', { id: 'form-capture-type', className: 'form-input', type: 'text' });
+        captureTypeInput.placeholder = "例如: reCAPTCHA";
+        form.appendChild(createFormGroup('验证码类型:', captureTypeInput));
+
+        const remarksInput = createSimpleElement('textarea', { id: 'form-remarks', className: 'form-input' });
+        remarksInput.rows = 3; remarksInput.maxLength = 2000;
+        form.appendChild(createFormGroup('备注:', remarksInput));
+
+        const actions = createSimpleElement('div', { className: 'form-actions' });
+        const submitBtn = createSimpleElement('button', { id: 'submit-link-btn', type: 'submit', textContent: '确认提交' });
+        const cancelBtn = createSimpleElement('button', { id: 'cancel-submission-btn', type: 'button', textContent: '取消' });
+        cancelBtn.addEventListener('click', setInitialState);
+        actions.appendChild(submitBtn);
+        actions.appendChild(cancelBtn);
+        form.appendChild(actions);
+
+        form.appendChild(createSimpleElement('div', { id: 'submission-status' }));
+        form.addEventListener('submit', handleFormSubmission);
+        resultsDiv.appendChild(form);
     }
-
-    async function handleFormSubmission(event) {
+    async function handleFormSubmission(event) { /* ... 内容不变 ... */
         event.preventDefault();
         const statusDiv = document.getElementById('submission-status');
         const submitBtn = document.getElementById('submit-link-btn');
@@ -309,7 +369,7 @@
             token: apiToken,
             full_url: window.location.href,
             as: parseInt(document.getElementById('form-as').value, 10) || 0,
-            dr: parseInt(document.getElementById('form-dr').value, 10) || 0,
+            dr: parseInt(document.getElementById('dr').value, 10) || 0,
             need_login: document.getElementById('form-need-login').checked,
             has_capture: document.getElementById('form-has-capture').checked,
             capture_type: document.getElementById('form-capture-type').value.trim(),
@@ -340,39 +400,7 @@
             }
         });
     }
-
-
-    // --- 核心逻辑 ---
-    async function initialize() {
-        geminiApiKey = await GM_getValue('GEMINI_API_KEY', null);
-        apiToken = await GM_getValue('API_TOKEN', null);
-        geminiApiKeyInput.value = geminiApiKey || '';
-        apiTokenInput.value = apiToken || '';
-
-        setInitialState();
-        setupEventListeners();
-        setupLinkHoverIndicator();
-
-        setTimeout(() => {
-            scanAndPrepareDofollowLinks();
-            setupIntersectionObserverForLinks();
-        }, 1000);
-    }
-
-    function setInitialState() {
-        resultsDiv.innerHTML = `
-             <button id="run-analysis-btn" class="action-btn">手动分析当前页面</button>
-             <button id="show-submission-form-btn" class="action-btn">提交当前链接</button>
-        `;
-        document.getElementById('run-analysis-btn').addEventListener('click', () => {
-            document.getElementById('run-analysis-btn').style.display = 'none';
-            document.getElementById('show-submission-form-btn').style.display = 'none';
-            runAnalysis();
-        });
-        document.getElementById('show-submission-form-btn').addEventListener('click', displaySubmissionForm);
-    }
-
-    function setupEventListeners() {
+    function setupEventListeners() { /* ... 内容不变 ... */
         toggleButton.addEventListener('click', () => {
             panel.style.display = panel.style.display === 'flex' ? 'none' : 'flex';
         });
@@ -397,27 +425,29 @@
             setTimeout(() => { saveApiTokenBtn.textContent = '保存Token'; }, 2000);
         });
 
-        document.getElementById('dofollow-nav-up').addEventListener('click', () => navigateToDofollowLink('prev'));
-        document.getElementById('dofollow-nav-down').addEventListener('click', () => navigateToDofollowLink('next'));
+        panel.addEventListener('click', function(event) {
+            if (event.target.id === 'dofollow-nav-up') {
+                navigateToDofollowLink('prev');
+            } else if (event.target.id === 'dofollow-nav-down') {
+                navigateToDofollowLink('next');
+            }
+        });
     }
-
-    async function runAnalysis() {
+    async function runAnalysis() { /* ... 内容不变 ... */
         if (!geminiApiKey) {
-            resultsDiv.innerHTML = `<p class="error-message">请先设置您的Gemini API Key!</p>`;
+            displayMessage(resultsDiv, '请先设置您的Gemini API Key!', 'error-message');
             settingsArea.style.display = 'block';
             geminiApiKeyInput.focus();
             return;
         }
 
-        resultsDiv.innerHTML = '<p class="status-message">正在扫描页面Dofollow外链...</p>';
+        displayMessage(resultsDiv, '正在扫描页面Dofollow外链...', 'status-message');
         scanAndPrepareDofollowLinks();
         const dofollowCount = dofollowLinks.length;
 
         if (dofollowCount <= DOFOLLOW_THRESHOLD) {
-            resultsDiv.innerHTML = `<p class="status-message">分析终止：页面Dofollow外链数量为 ${dofollowCount}，未超过 ${DOFOLLOW_THRESHOLD} 个的阈值。</p>`;
-            const resetButton = document.createElement('button');
-            resetButton.textContent = '重新开始';
-            resetButton.className = 'action-btn';
+            displayMessage(resultsDiv, `分析终止：页面Dofollow外链数量为 ${dofollowCount}，未超过 ${DOFOLLOW_THRESHOLD} 个的阈值。`, 'status-message');
+            const resetButton = createSimpleElement('button', { textContent: '重新开始', className: 'action-btn' });
             resetButton.style.backgroundColor = '#6c757d';
             resetButton.style.marginTop = '10px';
             resetButton.onclick = setInitialState;
@@ -425,11 +455,10 @@
             return;
         }
 
-        resultsDiv.innerHTML = `<p class="status-message">检测到 ${dofollowCount} 个Dofollow外链，正在请求AI分析页面...</p>`;
+        displayMessage(resultsDiv, `检测到 ${dofollowCount} 个Dofollow外链，正在请求AI分析页面...`, 'status-message');
         callAiApi(dofollowCount > 0, geminiApiKey);
     }
-
-    function callAiApi(hasDofollow, currentApiKey) {
+    function callAiApi(hasDofollow, currentApiKey) { /* ... 内容不变 ... */
         const pageHtml = document.documentElement.outerHTML;
         const prompt = `
             You are an expert webpage analyzer. Your task is to analyze the provided HTML content and return a specific JSON object.
@@ -458,7 +487,7 @@
                     const aiRawData = JSON.parse(response.responseText);
                     if (aiRawData.error) {
                         const { code, message } = aiRawData.error;
-                        resultsDiv.innerHTML = `<p class="error-message">API返回错误:<br>代码: ${code}<br>消息: ${message}</p>`;
+                        displayMessage(resultsDiv, `API返回错误:<br>代码: ${code}<br>消息: ${message}`, 'error-message', true);
                         return;
                     }
                     const responseText = aiRawData.candidates[0].content.parts[0].text;
@@ -466,38 +495,54 @@
                     displayResultsTable(aiJson, hasDofollow);
                 } catch (error) {
                     console.error("AI Response Parsing Error:", error, "Raw Response:", response.responseText);
-                    resultsDiv.innerHTML = `<p class="error-message">AI分析失败！<br>理由: 无法解析AI返回的数据。<br>请检查控制台获取更多信息。</p>`;
+                    displayMessage(resultsDiv, 'AI分析失败！<br>理由: 无法解析AI返回的数据。<br>请检查控制台获取更多信息。', 'error-message', true);
                 }
             },
             onerror: function(error) {
                 console.error("GM_xmlhttpRequest Error:", error);
-                resultsDiv.innerHTML = `<p class="error-message">AI分析失败！<br>理由: 请求未能送达至您的服务器 (${CUSTOM_BASE_URL})。<br>请检查服务器运行状态和浏览器控制台。</p>`;
+                displayMessage(resultsDiv, `AI分析失败！<br>理由: 请求未能送达至您的服务器 (${CUSTOM_BASE_URL})。<br>请检查服务器运行状态和浏览器控制台。`, 'error-message', true);
             }
         });
     }
+    function displayResultsTable(aiData, hasDofollow) { /* ... 内容不变 ... */
+        clearElement(resultsDiv);
+        const table = createSimpleElement('table', { id: 'ai-results-table' });
+        const thead = createSimpleElement('thead');
+        const headerRow = createSimpleElement('tr');
+        ['URL', '是否需登录', '有Dofollow', '有验证', '验证类型', '备注'].forEach(text => {
+            headerRow.appendChild(createSimpleElement('th', { textContent: text }));
+        });
+        thead.appendChild(headerRow);
+        table.appendChild(thead);
 
-    function displayResultsTable(aiData, hasDofollow) {
-        const tableHTML = `
-            <table id="ai-results-table">
-                <thead><tr><th>URL</th><th>是否需登录</th><th>有Dofollow</th><th>有验证</th><th>验证类型</th><th>备注</th></tr></thead>
-                <tbody><tr>
-                    <td>${window.location.href}</td>
-                    <td>${aiData.requiresLogin ? '是' : '否'}</td>
-                    <td>${hasDofollow ? '是' : '否'}</td>
-                    <td>${aiData.hasVerification ? '是' : '否'}</td>
-                    <td>${aiData.verificationType || '无'}</td>
-                    <td>${aiData.pageType || 'N/A'}</td>
-                </tr></tbody>
-            </table>
-            <button id="copy-table-btn">复制表格</button>
-            <button id="restart-btn" style="float: left; margin-top: 15px; background-color: #6c757d; color: white; border: none; padding: 8px 12px; border-radius: 4px; cursor: pointer;">返回主页</button>
-        `;
-        resultsDiv.innerHTML = tableHTML;
-        document.getElementById('copy-table-btn').addEventListener('click', copyTableToClipboard);
-        document.getElementById('restart-btn').addEventListener('click', setInitialState);
+        const tbody = createSimpleElement('tbody');
+        const bodyRow = createSimpleElement('tr');
+        [
+            window.location.href,
+            aiData.requiresLogin ? '是' : '否',
+            hasDofollow ? '是' : '否',
+            aiData.hasVerification ? '是' : '否',
+            aiData.verificationType || '无',
+            aiData.pageType || 'N/A'
+        ].forEach(text => {
+            bodyRow.appendChild(createSimpleElement('td', { textContent: text }));
+        });
+        tbody.appendChild(bodyRow);
+        table.appendChild(tbody);
+        resultsDiv.appendChild(table);
+
+        const copyBtn = createSimpleElement('button', { id: 'copy-table-btn', textContent: '复制表格' });
+        copyBtn.addEventListener('click', copyTableToClipboard);
+        resultsDiv.appendChild(copyBtn);
+
+        const restartBtn = createSimpleElement('button', { id: 'restart-btn', textContent: '返回主页' });
+        restartBtn.style.cssText = "float: left; margin-top: 15px; background-color: #6c757d; color: white; border: none; padding: 8px 12px; border-radius: 4px; cursor: pointer; transition: background-color 0.2s ease;";
+        restartBtn.onmouseover = () => restartBtn.style.backgroundColor = '#5a6268';
+        restartBtn.onmouseout = () => restartBtn.style.backgroundColor = '#6c757d';
+        restartBtn.addEventListener('click', setInitialState);
+        resultsDiv.appendChild(restartBtn);
     }
-
-    function copyTableToClipboard() {
+    function copyTableToClipboard() { /* ... 内容不变 ... */
         const table = document.getElementById('ai-results-table');
         if (!table) return;
         let text = Array.from(table.querySelectorAll('tr')).map(row =>
@@ -508,8 +553,28 @@
         GM_setClipboard(text.trim());
         alert('表格内容已复制到剪贴板！');
     }
+    function onPageFullyLoaded() { /* ... 内容不变 ... */
+        isPageFullyLoaded = true;
+        const analysisBtn = document.getElementById('run-analysis-btn');
+        if (analysisBtn) {
+            analysisBtn.disabled = false;
+            analysisBtn.textContent = '手动分析当前页面';
+            analysisBtn.title = '开始分析页面内容和外链';
+        }
+        scanAndPrepareDofollowLinks();
+        setupIntersectionObserverForLinks();
+        setupLinkHoverIndicator();
+    }
+    async function initialize() { /* ... 内容不变 ... */
+        buildInitialPanel();
+        geminiApiKey = await GM_getValue('GEMINI_API_KEY', null);
+        apiToken = await GM_getValue('API_TOKEN', null);
+        if (geminiApiKeyInput) geminiApiKeyInput.value = geminiApiKey || '';
+        if (apiTokenInput) apiTokenInput.value = apiToken || '';
+        setInitialState();
+        setupEventListeners();
+        window.addEventListener('load', onPageFullyLoaded);
+    }
 
-    // --- 脚本启动 ---
     initialize();
-
 })();
