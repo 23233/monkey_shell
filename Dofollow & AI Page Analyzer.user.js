@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         SEO页面内容分析器 (美化修复版)
+// @name         SEO页面内容分析器 (美化修复与链接高亮版)
 // @namespace    http://tampermonkey.net/
-// @version      3.7
-// @description  分析Dofollow外链, AI分析页面内容, 支持链接跳转导航, 并可提交链接到外部系统. 修复了TrustedHTML并美化了UI, 新增每日提交计数和提交前存在性检查功能, 优化了提交和API密钥处理逻辑.
+// @version      3.8
+// @description  【新增】为所有Dofollow/Nofollow外链添加独特的、唯一的、持续的样式，方便快速区分。【优化】通过MutationObserver实现对动态加载链接的实时监听和样式应用。分析Dofollow外链, AI分析页面内容, 支持链接跳转导航, 并可提交链接到外部系统. 修复了TrustedHTML并美化了UI, 新增每日提交计数和提交前存在性检查功能, 优化了提交和API密钥处理逻辑.
 // @author       23233 (由Gemini修改)
 // @match        *://*/*
 // @connect      entry.a0go.com
@@ -30,6 +30,16 @@
 
     // --- 样式注入 (美化更新) ---
     GM_addStyle(`
+        /* --- 新增：Dofollow/Nofollow 链接的唯一识别样式 --- */
+        a.gm-dofollow-link {
+            border-bottom: 2px dotted #28a745 !important; /* Dofollow 使用绿色虚线 */
+            text-decoration: none !important;
+        }
+        a.gm-nofollow-link {
+            border-bottom: 2px dotted #d9534f !important; /* Nofollow 使用红色虚线 */
+            text-decoration: none !important;
+        }
+
         #ai-analyzer-toggle-btn { position: fixed; bottom: 20px; right: 30px; min-width: 40px; height: 40px; padding: 0 12px; background-color: #007bff; color: white; border: none; border-radius: 20px; font-size: 18px; font-weight: bold; cursor: pointer; z-index: 100000; box-shadow: 0 4px 8px rgba(0,0,0,0.2); display: flex; justify-content: center; align-items: center; line-height: 40px; }
         #ai-analyzer-panel { position: fixed; bottom: 80px; right: 20px; width: 450px; max-height: 600px; background-color: #f9f9f9; border: 1px solid #ccc; border-radius: 8px; z-index: 9999; box-shadow: 0 4px 12px rgba(0,0,0,0.15); display: none; flex-direction: column; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
         .ai-analyzer-header { padding: 10px 15px; background-color: #f1f1f1; border-bottom: 1px solid #ddd; display: flex; justify-content: space-between; align-items: center; cursor: move; }
@@ -198,23 +208,61 @@
         }
     }
 
+    // [新增] 负责处理单个链接，为其添加 Dofollow 或 Nofollow 样式
+    function processLinkStyle(link) {
+        try {
+            if (!link.href) return; // 忽略没有 href 的链接
+            const currentHostname = window.location.hostname;
+            const linkUrl = new URL(link.href, window.location.href);
 
-    function scanAndPrepareDofollowLinks() {
-        dofollowLinks = [];
-        currentLinkIndex = -1;
-        const currentHostname = window.location.hostname;
-        document.querySelectorAll('a[href]').forEach(link => {
-            try {
-                if (!link.href || !link.offsetParent) return;
-                const linkUrl = new URL(link.href, window.location.href);
-                if (linkUrl.hostname && linkUrl.hostname !== currentHostname) {
-                    const rel = link.getAttribute('rel') || '';
-                    if (!rel.toLowerCase().includes('nofollow')) {
-                        dofollowLinks.push(link);
-                    }
+            // 仅处理外部链接
+            if (linkUrl.hostname === currentHostname) return;
+
+            const rel = link.getAttribute('rel') || '';
+            if (rel.toLowerCase().includes('nofollow')) {
+                link.classList.add('gm-nofollow-link');
+                link.classList.remove('gm-dofollow-link'); // 确保样式不冲突
+            } else {
+                link.classList.add('gm-dofollow-link');
+                link.classList.remove('gm-nofollow-link'); // 确保样式不冲突
+            }
+        } catch (e) {
+            // 忽略无效的 URL
+        }
+    }
+
+    // [新增] 启动一个MutationObserver来监听整个文档中的DOM变化
+    function observeDOMForLinks() {
+        const observer = new MutationObserver(mutations => {
+            mutations.forEach(mutation => {
+                if (mutation.addedNodes) {
+                    mutation.addedNodes.forEach(node => {
+                        if (node.nodeType === 1) { // 仅处理元素节点
+                            // 如果添加的节点本身就是链接
+                            if (node.matches('a[href]')) {
+                                processLinkStyle(node);
+                            }
+                            // 查找并处理新节点下的所有链接
+                            node.querySelectorAll('a[href]').forEach(processLinkStyle);
+                        }
+                    });
                 }
-            } catch (e) { /* 忽略无效URL */ }
+            });
         });
+
+        // 从 document.body 开始观察，覆盖所有子节点的添加
+        observer.observe(document.body, {
+            childList: true,
+            subtree: true
+        });
+    }
+
+
+    // [优化] 此函数现在只收集已被标记的链接，用于导航功能，不再执行扫描逻辑
+    function scanAndPrepareDofollowLinks() {
+        dofollowLinks = Array.from(document.querySelectorAll('a.gm-dofollow-link'));
+        currentLinkIndex = -1;
+
         const dofollowCount = dofollowLinks.length;
         const counter = document.getElementById('external-link-counter');
         if(counter) counter.textContent = `(Dofollow: ${dofollowCount})`;
@@ -512,7 +560,7 @@
         }
 
         displayMessage(resultsDiv, '正在扫描页面Dofollow外链...', 'status-message');
-        scanAndPrepareDofollowLinks();
+        scanAndPrepareDofollowLinks(); // 此时只是为了更新计数和准备导航
         const dofollowCount = dofollowLinks.length;
 
         if (dofollowCount <= DOFOLLOW_THRESHOLD) {
@@ -644,6 +692,19 @@
         if (apiTokenInput) apiTokenInput.value = apiToken || '';
         setInitialState();
         setupEventListeners();
+
+        // --- 新增的初始化流程 ---
+        // 1. 对页面已存在的链接进行初次扫描和样式应用
+        document.querySelectorAll('a[href]').forEach(processLinkStyle);
+        // 2. 启动 MutationObserver 来监听后续动态添加的链接
+        if (document.body) {
+            observeDOMForLinks();
+        } else {
+            // 如果脚本在 body 出现前执行，则等待 DOMContentLoaded 事件
+            document.addEventListener('DOMContentLoaded', observeDOMForLinks);
+        }
+        // -----------------------
+
         window.addEventListener('load', onPageFullyLoaded);
     }
 
