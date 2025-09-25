@@ -4,7 +4,7 @@
 // @version      2.1
 // @description  通过选择本地文件夹，构建可折叠/展开的文件树，支持过滤，支持多选，一键复制"路径+内容"到剪贴板。现已支持保存和管理多个项目，并修复了CSP兼容性问题。
 // @author       23233
-// @match        *://*/*
+// @match        *://aistudio.google.com/*
 // @grant        GM_addStyle
 // @license      MIT
 // ==/UserScript==
