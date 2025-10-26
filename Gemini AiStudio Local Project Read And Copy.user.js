@@ -1,532 +1,362 @@
 // ==UserScript==
-// @name         本地项目文件内容读取工具 (v2.1-CSP兼容修复)
+// @name         Jules 提示词管理器 (ProseMirror 适配版)
 // @namespace    http://tampermonkey.net/
-// @version      2.1
-// @description  通过选择本地文件夹，构建可折叠/展开的文件树，支持过滤，支持多选，一键复制"路径+内容"到剪贴板。现已支持保存和管理多个项目，并修复了CSP兼容性问题。
-// @author       23233
-// @match        *://aistudio.google.com/*
+// @version      8.1
+// @description  支持本地存储、管理多个提示词，并可设置默认提示词进行自动注入。修复了 TrustedHTML 兼容性问题。
+// @author       Gemini (Enhanced by AI & TrustedHTML fix)
+// @match        https://jules.google.com/task*
+// @match        https://jules.google.com/session*
+// @grant        GM_setValue
+// @grant        GM_getValue
 // @grant        GM_addStyle
-// @license      MIT
+// @run-at       document-idle
 // ==/UserScript==
 
 (function() {
     'use strict';
 
-    // --- 配置区域 ---
-    const foldersToIgnore = ['.git', '.idea', 'node_modules', '__pycache__', "logs"]; // 忽略的文件夹名称
-    const prefix = 'upc-'; // 所有CSS类名和ID的前缀，防止冲突
-    const positionStorageKey = `${prefix}panel-position`; // localStorage中保存面板位置的键名
-    const lastProjectKey = `${prefix}last-active-project`; // localStorage中保存上个激活项目名称的键名
+    // 默认的初始提示词，仅在首次使用时或清空后添加
+    const INITIAL_PROMPT = {
+        id: Date.now(),
+        name: '默认开发任务模板',
+        content: `必须读取项目中的AGENTS.md,严格按照AGENTS.md里面的说明去理解和阅读整个项目.
+要解决的问题,首先需要理解这个问题的需求,然后对比代码中的实现,找到实现策略,相关调用和受到影响的地方需要同步变更.不要遗漏,要精准.每次需要在history文件夹中新增本次变更的说明markdown文档并且必须完整说明需求和解决方案.
+## 以下是本次需要解决的问题
+`,
+        isDefault: true
+    };
 
-    // --- IndexedDB 封装 ---
-    const dbName = 'project-copier-db';
-    const storeName = 'directory-handles';
-    let db;
+    const STORAGE_KEY = 'jules_prompt_manager_v8'; // key 保持 v8，数据结构不变
+    let uiCreated = false;
 
-    async function openDb() {
-        if (db) return db;
-        return new Promise((resolve, reject) => {
-            const request = indexedDB.open(dbName, 1);
-            request.onupgradeneeded = () => request.result.createObjectStore(storeName);
-            request.onsuccess = () => { db = request.result; resolve(db); };
-            request.onerror = (event) => reject('IndexedDB error: ' + event.target.errorCode);
-        });
+    // --- 数据管理函数 (无需修改) ---
+    async function loadPrompts() {
+        const storedData = await GM_getValue(STORAGE_KEY, null);
+        if (storedData) {
+            try {
+                const parsed = JSON.parse(storedData);
+                return Array.isArray(parsed) ? parsed : [INITIAL_PROMPT];
+            } catch (e) {
+                console.error("Jules 提示词管理器: 解析存储数据失败。", e);
+                return [INITIAL_PROMPT];
+            }
+        }
+        return [INITIAL_PROMPT];
     }
 
-    async function setHandle(key, value) {
-        const db = await openDb();
-        return new Promise((resolve, reject) => {
-            const tx = db.transaction(storeName, 'readwrite');
-            tx.objectStore(storeName).put(value, key);
-            tx.oncomplete = () => resolve();
-            tx.onerror = (event) => reject('Transaction error: ' + event.target.errorCode);
-        });
+    async function savePrompts(prompts) {
+        await GM_setValue(STORAGE_KEY, JSON.stringify(prompts));
     }
 
-    async function getHandle(key) {
-        const db = await openDb();
-        return new Promise((resolve, reject) => {
-            const request = db.transaction(storeName, 'readonly').objectStore(storeName).get(key);
-            request.onsuccess = () => resolve(request.result);
-            request.onerror = (event) => reject('Transaction error: ' + event.target.errorCode);
+    // --- 核心功能函数 (无需修改) ---
+    function applyTemplate(baseTemplate) {
+        const mainEditor = document.querySelector('swebot-prompt-editor .ProseMirror[contenteditable="true"]');
+        if (!mainEditor) return;
+
+        const today = new Date();
+        const dateString = `今天是 ${today.getFullYear()}年${today.getMonth() + 1}月${today.getDate()}日`;
+        const finalText = `${baseTemplate}\n${dateString}`;
+
+        while (mainEditor.firstChild) {
+            mainEditor.removeChild(mainEditor.firstChild);
+        }
+
+        const lines = finalText.split('\n');
+        lines.forEach(lineText => {
+            const p = document.createElement('p');
+            if (lineText.trim() === '') {
+                p.appendChild(document.createElement('br'));
+            } else {
+                p.textContent = lineText;
+            }
+            mainEditor.appendChild(p);
         });
+
+        mainEditor.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
     }
 
-    async function getAllHandleKeys() {
-        const db = await openDb();
-        return new Promise((resolve, reject) => {
-            const request = db.transaction(storeName, 'readonly').objectStore(storeName).getAllKeys();
-            request.onsuccess = () => resolve(request.result.sort());
-            request.onerror = (event) => reject('Transaction error: ' + event.target.errorCode);
-        });
-    }
 
-    async function deleteHandle(key) {
-        const db = await openDb();
-        return new Promise((resolve, reject) => {
-            const tx = db.transaction(storeName, 'readwrite');
-            tx.objectStore(storeName).delete(key);
-            tx.oncomplete = () => resolve();
-            tx.onerror = (event) => reject('Transaction error: ' + event.target.errorCode);
-        });
-    }
+    // --- UI 创建与管理 (已重构以移除 innerHTML) ---
+    function createAndShowUI() {
+        if (uiCreated) return;
+        uiCreated = true;
 
-    // --- 全局变量 ---
-    let rootDirectoryHandle = null;
+        // CSS 样式 (无需修改)
+        GM_addStyle(`
+            #prompt-manager-btn-v8 { position: fixed !important; bottom: 15px !important; right: 15px !important; z-index: 99998 !important; background-color: #4285F4 !important; color: white !important; border: none !important; border-radius: 50% !important; width: 32px !important; height: 32px !important; font-size: 16px !important; cursor: pointer !important; box-shadow: 0 2px 6px rgba(0,0,0,0.3) !important; display: flex !important; align-items: center !important; justify-content: center !important; padding: 0 !important; margin: 0 !important; line-height: 1 !important; }
+            #prompt-manager-panel-v8 { position: fixed !important; top: 50% !important; left: 50% !important; transform: translate(-50%, -50%) !important; width: 70vw !important; max-width: 700px !important; min-width: 500px !important; background-color: #fff !important; border: 1px solid #ccc !important; box-shadow: 0 5px 15px rgba(0,0,0,0.4) !important; z-index: 99999 !important; display: none; flex-direction: column !important; border-radius: 8px !important; font-family: sans-serif !important; }
+            #prompt-manager-panel-v8 * { font-family: sans-serif !important; box-sizing: border-box !important; }
+            #prompt-manager-panel-v8 .pm-header, #prompt-manager-panel-v8 .pm-footer { padding: 12px 18px !important; background-color: #f5f5f5 !important; border-bottom: 1px solid #ddd !important; display: flex !important; justify-content: space-between !important; align-items: center !important; }
+            #prompt-manager-panel-v8 .pm-footer { border-top: 1px solid #ddd !important; border-bottom: none !important; }
+            #prompt-manager-panel-v8 .pm-title { font-size: 16px !important; font-weight: bold !important; color: #333 !important; }
+            #prompt-manager-panel-v8 .pm-close-btn { font-size: 24px !important; font-weight: bold !important; cursor: pointer !important; color: #888 !important; }
+            #prompt-manager-panel-v8 .pm-body { padding: 10px !important; max-height: 60vh !important; overflow-y: auto !important; }
+            #prompt-manager-panel-v8 .pm-list { list-style: none !important; padding: 0 !important; margin: 0 !important; }
+            #prompt-manager-panel-v8 .pm-item { display: flex !important; align-items: center !important; padding: 10px !important; border-bottom: 1px solid #eee !important; }
+            #prompt-manager-panel-v8 .pm-item:last-child { border-bottom: none !important; }
+            #prompt-manager-panel-v8 .pm-item-name { flex-grow: 1 !important; font-size: 14px !important; color: #333 !important; }
+            #prompt-manager-panel-v8 .pm-item-name .default-badge { background-color: #1a73e8 !important; color: white !important; font-size: 10px !important; padding: 2px 6px !important; border-radius: 4px !important; margin-left: 8px !important; font-weight: bold !important; vertical-align: middle !important; }
+            #prompt-manager-panel-v8 .pm-item-actions button { margin-left: 8px !important; padding: 5px 10px !important; font-size: 12px !important; border: 1px solid #ccc !important; border-radius: 4px !important; cursor: pointer !important; background-color: #f9f9f9 !important; color: #333 !important; }
+            #prompt-manager-panel-v8 .pm-item-actions button.primary { background-color: #e8f0fe !important; color: #1a73e8 !important; border-color: #1a73e8 !important; }
+            #prompt-manager-panel-v8 .pm-item-actions button:hover { background-color: #f0f0f0 !important; border-color: #aaa !important; }
+            #prompt-edit-modal-v8 { position: fixed !important; top: 0 !important; left: 0 !important; width: 100% !important; height: 100% !important; background-color: rgba(0,0,0,0.5) !important; z-index: 100000 !important; display: none; align-items: center !important; justify-content: center !important; }
+            #prompt-edit-modal-v8 .modal-content { background: #fff !important; padding: 20px !important; border-radius: 8px !important; width: 60vw !important; max-width: 600px !important; display: flex !important; flex-direction: column !important; }
+            #prompt-edit-modal-v8 .modal-content h3 { margin: 0 0 15px 0 !important; font-size: 18px !important; }
+            #prompt-edit-modal-v8 .modal-content input, #prompt-edit-modal-v8 .modal-content textarea { width: 100% !important; padding: 10px !important; margin-bottom: 15px !important; border: 1px solid #ccc !important; border-radius: 4px !important; font-size: 14px !important; }
+            #prompt-edit-modal-v8 .modal-content textarea { height: 250px !important; resize: vertical !important; }
+            #prompt-edit-modal-v8 .modal-actions { text-align: right !important; }
+            #prompt-edit-modal-v8 .modal-actions button { padding: 8px 16px !important; margin-left: 10px !important; border-radius: 4px !important; border: 1px solid #ccc !important; cursor: pointer !important; }
+            #prompt-edit-modal-v8 .modal-actions .save-btn { background-color: #4285F4 !important; color: white !important; border-color: #4285F4 !important; }
+        `);
 
-    // --- UI 构建 ---
-    function buildUI() {
+        // --- 创建主 UI 元素 (无 innerHTML) ---
+        const managerBtn = document.createElement('button');
+        managerBtn.id = 'prompt-manager-btn-v8';
+        managerBtn.textContent = 'P';
+        managerBtn.title = '打开提示词管理器';
+        document.body.appendChild(managerBtn);
+
         const panel = document.createElement('div');
-        panel.id = `${prefix}panel`;
+        panel.id = 'prompt-manager-panel-v8';
 
+        // 创建面板头部
         const header = document.createElement('div');
-        header.id = `${prefix}header`;
-        const headerTitle = document.createElement('span');
-        headerTitle.textContent = '项目文件读取工具';
-        const toggleBtn = document.createElement('button');
-        toggleBtn.id = `${prefix}toggle-btn`;
-        toggleBtn.textContent = '+';
-        header.appendChild(headerTitle);
-        header.appendChild(toggleBtn);
+        header.className = 'pm-header';
+        const title = document.createElement('span');
+        title.className = 'pm-title';
+        title.textContent = '提示词管理器';
+        const closeBtn = document.createElement('span');
+        closeBtn.className = 'pm-close-btn';
+        closeBtn.title = '关闭';
+        closeBtn.textContent = '×';
+        header.appendChild(title);
+        header.appendChild(closeBtn);
 
-        const body = document.createElement('div');
-        body.id = `${prefix}body`;
-        body.classList.add(`${prefix}hidden`);
+        // 创建面板主体
+        const bodyDiv = document.createElement('div');
+        bodyDiv.className = 'pm-body';
+        const promptList = document.createElement('ul');
+        promptList.className = 'pm-list';
+        bodyDiv.appendChild(promptList);
 
-        const controls = document.createElement('div');
-        controls.id = `${prefix}controls`;
-
-        const projectManager = document.createElement('div');
-        projectManager.id = `${prefix}project-manager`;
-
-        const projectSelector = document.createElement('select');
-        projectSelector.id = `${prefix}project-selector`;
-        projectSelector.title = '切换已保存的项目';
-
-        const addProjectBtn = document.createElement('button');
-        addProjectBtn.id = `${prefix}add-project-btn`;
-        addProjectBtn.title = '选择并添加一个新的本地项目文件夹';
-        addProjectBtn.textContent = '✚ 添加';
-
-        const removeProjectBtn = document.createElement('button');
-        removeProjectBtn.id = `${prefix}remove-project-btn`;
-        removeProjectBtn.title = '从列表中移除当前选中的项目';
-        removeProjectBtn.textContent = '✖ 移除';
-
-        const refreshTreeBtn = document.createElement('button');
-        refreshTreeBtn.id = `${prefix}refresh-tree-btn`;
-        refreshTreeBtn.title = '重新加载当前项目的文件树';
-        refreshTreeBtn.textContent = '↻ 刷新';
-
-        projectManager.appendChild(projectSelector);
-        projectManager.appendChild(addProjectBtn);
-        projectManager.appendChild(removeProjectBtn);
-        projectManager.appendChild(refreshTreeBtn);
-        controls.appendChild(projectManager);
-
-        const fileTreeContainer = document.createElement('div');
-        fileTreeContainer.id = `${prefix}file-tree-container`;
-        fileTreeContainer.setAttribute('placeholder', '请从上方选择一个项目，或添加新项目...');
-
-        const copyContentBtn = document.createElement('button');
-        copyContentBtn.id = `${prefix}copy-content-btn`;
-        copyContentBtn.textContent = '复制选中内容到剪贴板';
-
-        const statusDiv = document.createElement('div');
-        statusDiv.id = `${prefix}status`;
-
-        body.appendChild(controls);
-        body.appendChild(fileTreeContainer);
-        body.appendChild(copyContentBtn);
-        body.appendChild(statusDiv);
+        // 创建面板底部
+        const footer = document.createElement('div');
+        footer.className = 'pm-footer';
+        const addNewBtn = document.createElement('button');
+        addNewBtn.id = 'add-new-prompt-btn-v8';
+        addNewBtn.textContent = '＋ 添加新提示词';
+        footer.appendChild(addNewBtn);
 
         panel.appendChild(header);
-        panel.appendChild(body);
+        panel.appendChild(bodyDiv);
+        panel.appendChild(footer);
         document.body.appendChild(panel);
 
-        const css = `
-            #${prefix}panel { position: fixed; width: 400px; max-width: 90vw; max-height: 80vh; background-color: #f0f0f0; border: 1px solid #ccc; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.2); z-index: 99999; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; display: flex; flex-direction: column; color: #333; }
-            #${prefix}header { padding: 8px 12px; background-color: #e0e0e0; cursor: move; border-bottom: 1px solid #ccc; border-radius: 8px 8px 0 0; display: flex; justify-content: space-between; align-items: center; font-weight: bold; }
-            #${prefix}body { padding: 12px; display: flex; flex-direction: column; overflow: hidden; }
-            #${prefix}body.${prefix}hidden { display: none; }
-            #${prefix}controls { margin-bottom: 12px; }
-            #${prefix}project-manager { display: grid; grid-template-columns: 1fr auto auto auto; gap: 8px; align-items: center; }
-            #${prefix}project-selector { width: 100%; padding: 6px; border: 1px solid #ccc; border-radius: 4px; }
-            #${prefix}panel button { padding: 8px 12px; border: 1px solid #ccc; border-radius: 4px; background-color: #fff; cursor: pointer; transition: background-color 0.2s; white-space: nowrap; }
-            #${prefix}panel button:hover:not(:disabled) { background-color: #e6e6e6; }
-            #${prefix}panel button:disabled { cursor: not-allowed; background-color: #f8f8f8; color: #aaa; }
-            #${prefix}file-tree-container { flex-grow: 1; overflow-y: auto; border: 1px solid #ccc; padding: 8px; background-color: #fff; min-height: 150px; margin-bottom: 12px; }
-            #${prefix}file-tree-container:empty::before { content: attr(placeholder); color: #999; }
-            #${prefix}status { font-size: 12px; color: green; text-align: center; min-height: 1em; }
-            .${prefix}tree-ul { list-style-type: none; padding-left: 20px; }
-            .${prefix}tree-li { margin: 4px 0; }
-            .${prefix}tree-li label { display: flex; align-items: center; }
-            .${prefix}tree-li input[type="checkbox"] { margin-right: 8px; }
-            .${prefix}folder-label { cursor: pointer; }
-            .${prefix}folder-label::before { content: '📁'; margin-right: 4px; }
-            .${prefix}file-label::before { content: '📄'; margin-right: 4px; }
-            .${prefix}folder-label.${prefix}collapsible::before { content: '+ 📁'; font-family: monospace; }
-            .${prefix}folder-label.${prefix}collapsible.${prefix}expanded::before { content: '- 📁'; font-family: monospace; }
-            .${prefix}tree-ul.${prefix}nested { display: none; }
-            .${prefix}tree-ul.${prefix}nested.${prefix}active { display: block; }
-        `;
-        GM_addStyle(css);
-    }
+        // --- 创建编辑/新增模态框 (无 innerHTML) ---
+        const modal = document.createElement('div');
+        modal.id = 'prompt-edit-modal-v8';
 
-    // --- 功能实现 ---
+        const modalContent = document.createElement('div');
+        modalContent.className = 'modal-content';
 
-    function updateUI() {
-        const hasActiveProject = !!rootDirectoryHandle;
-        document.getElementById(`${prefix}copy-content-btn`).disabled = !hasActiveProject;
-        document.getElementById(`${prefix}remove-project-btn`).disabled = !hasActiveProject;
-        document.getElementById(`${prefix}refresh-tree-btn`).disabled = !hasActiveProject;
-        const selector = document.getElementById(`${prefix}project-selector`);
-        if (selector.options.length === 0) {
-            document.getElementById(`${prefix}remove-project-btn`).disabled = true;
-        }
-    }
+        const modalTitle = document.createElement('h3');
+        modalTitle.id = 'modal-title-v8';
 
-    function showStatus(message, duration = 3000) {
-        const statusEl = document.getElementById(`${prefix}status`);
-        statusEl.textContent = message;
-        setTimeout(() => {
-            if (statusEl.textContent === message) {
-                statusEl.textContent = '';
+        const modalNameInput = document.createElement('input');
+        modalNameInput.type = 'text';
+        modalNameInput.id = 'prompt-name-input-v8';
+        modalNameInput.placeholder = '提示词名称 (例如：代码审查模板)';
+
+        const modalContentInput = document.createElement('textarea');
+        modalContentInput.id = 'prompt-content-input-v8';
+        modalContentInput.placeholder = '在此输入提示词内容...';
+
+        const modalActions = document.createElement('div');
+        modalActions.className = 'modal-actions';
+
+        const modalCancelBtn = document.createElement('button');
+        modalCancelBtn.id = 'modal-cancel-btn-v8';
+        modalCancelBtn.textContent = '取消';
+
+        const modalSaveBtn = document.createElement('button');
+        modalSaveBtn.id = 'modal-save-btn-v8';
+        modalSaveBtn.className = 'save-btn';
+        modalSaveBtn.textContent = '保存';
+
+        modalActions.appendChild(modalCancelBtn);
+        modalActions.appendChild(modalSaveBtn);
+        modalContent.appendChild(modalTitle);
+        modalContent.appendChild(modalNameInput);
+        modalContent.appendChild(modalContentInput);
+        modalContent.appendChild(modalActions);
+        modal.appendChild(modalContent);
+        document.body.appendChild(modal);
+
+        // --- UI 渲染函数 (已重构) ---
+        async function renderPromptList() {
+            const prompts = await loadPrompts();
+            // 安全地清空列表
+            while (promptList.firstChild) {
+                promptList.removeChild(promptList.firstChild);
             }
-        }, duration);
-    }
 
-    async function createFileTree(directoryHandle, currentPath = '') {
-        const ul = document.createElement('ul');
-        ul.className = `${prefix}tree-ul`;
-        try {
-            const entries = [];
-            for await (const entry of directoryHandle.values()) {
-                entries.push(entry);
-            }
-            entries.sort((a, b) => {
-                if (a.kind !== b.kind) return a.kind === 'directory' ? -1 : 1;
-                return a.name.localeCompare(b.name);
-            });
-
-            for (const entry of entries) {
-                if (entry.kind === 'directory' && foldersToIgnore.includes(entry.name)) {
-                    continue;
-                }
-                const li = document.createElement('li');
-                li.className = `${prefix}tree-li`;
-                li.handle = entry;
-                li.dataset.path = `${currentPath}${entry.name}`;
-                const label = document.createElement('label');
-                const checkbox = document.createElement('input');
-                checkbox.type = 'checkbox';
-                label.appendChild(checkbox);
-                const nameSpan = document.createElement('span');
-                nameSpan.textContent = entry.name;
-                label.appendChild(nameSpan);
-                li.appendChild(label);
-
-                if (entry.kind === 'directory') {
-                    li.classList.add(`${prefix}folder-entry`);
-                    label.classList.add(`${prefix}folder-label`, `${prefix}collapsible`);
-                    li.dataset.path += '/';
-                    const subUl = await createFileTree(entry, li.dataset.path);
-                    if (subUl.hasChildNodes()) {
-                        subUl.classList.add(`${prefix}nested`);
-                        li.appendChild(subUl);
-                    } else {
-                        label.classList.remove(`${prefix}collapsible`);
-                    }
-                } else {
-                    li.classList.add(`${prefix}file-entry`);
-                    label.classList.add(`${prefix}file-label`);
-                }
-                ul.appendChild(li);
-            }
-        } catch (error) {
-            console.error("无法访问文件系统:", error);
-            showStatus("错误: 无法读取文件夹内容。", 5000);
-        }
-        return ul;
-    }
-
-    async function renderFileTree() {
-        const container = document.getElementById(`${prefix}file-tree-container`);
-        if (!rootDirectoryHandle) {
-            // 【修复】使用 replaceChildren 替代 innerHTML
-            container.replaceChildren();
-            updateUI();
-            return;
-        }
-        container.textContent = '正在加载文件树...';
-        if (await verifyPermission(rootDirectoryHandle)) {
-            const treeUl = await createFileTree(rootDirectoryHandle, '');
-            // 【修复】使用 replaceChildren 替代 innerHTML
-            container.replaceChildren(treeUl);
-        } else {
-            container.textContent = '';
-            showStatus(`项目 "${rootDirectoryHandle.name}" 需要授权，请刷新。`);
-            rootDirectoryHandle = null;
-        }
-        updateUI();
-    }
-
-    async function verifyPermission(handle) {
-        if (await handle.queryPermission({ mode: 'read' }) === 'granted') {
-            return true;
-        }
-        if (await handle.requestPermission({ mode: 'read' }) === 'granted') {
-            return true;
-        }
-        return false;
-    }
-
-    async function populateProjectSelector() {
-        const selector = document.getElementById(`${prefix}project-selector`);
-        const savedKeys = await getAllHandleKeys();
-        // 【修复】使用 replaceChildren 替代 innerHTML
-        selector.replaceChildren();
-        if (savedKeys.length === 0) {
-            const defaultOption = document.createElement('option');
-            defaultOption.textContent = '暂无项目';
-            selector.appendChild(defaultOption);
-            selector.disabled = true;
-        } else {
-            savedKeys.forEach(key => {
-                const option = document.createElement('option');
-                option.value = key;
-                option.textContent = key;
-                selector.appendChild(option);
-            });
-            selector.disabled = false;
-        }
-    }
-
-    async function switchProject(projectName) {
-        if (!projectName) {
-            rootDirectoryHandle = null;
-            await renderFileTree();
-            return;
-        }
-        try {
-            const handle = await getHandle(projectName);
-            if (handle) {
-                rootDirectoryHandle = handle;
-                localStorage.setItem(lastProjectKey, projectName);
-                document.getElementById(`${prefix}project-selector`).value = projectName;
-                await renderFileTree();
-                showStatus(`已切换到项目: ${projectName}`);
-            } else {
-                throw new Error("在数据库中找不到该项目");
-            }
-        } catch (error) {
-            console.error(`切换项目 "${projectName}" 失败:`, error);
-            showStatus(`切换项目失败，可能已被移除。`);
-            localStorage.removeItem(lastProjectKey);
-            rootDirectoryHandle = null;
-            await populateProjectSelector();
-            await renderFileTree();
-        }
-    }
-
-    function handleCheckboxChange(e) {
-        if (e.target.type !== 'checkbox') return;
-        const li = e.target.closest(`.${prefix}tree-li`);
-        if (!li || !li.classList.contains(`${prefix}folder-entry`)) return;
-        const isChecked = e.target.checked;
-        const subCheckboxes = li.querySelectorAll('input[type="checkbox"]');
-        subCheckboxes.forEach(cb => cb.checked = isChecked);
-    }
-
-    async function addNewProject() {
-        try {
-            const handle = await window.showDirectoryPicker();
-            if (handle) {
-                await setHandle(handle.name, handle);
-                await populateProjectSelector();
-                await switchProject(handle.name);
-            }
-        } catch (err) {
-            if (err.name !== 'AbortError') {
-                console.error("选择文件夹时发生错误:", err);
-                showStatus("选择文件夹失败！");
-            }
-        }
-    }
-
-    async function removeCurrentProject() {
-        const selector = document.getElementById(`${prefix}project-selector`);
-        const projectNameToRemove = selector.value;
-        if (!projectNameToRemove || selector.options.length === 0) {
-            showStatus("没有可移除的项目。");
-            return;
-        }
-        if (confirm(`确定要从列表中移除项目 "${projectNameToRemove}" 吗？\n(这不会删除你本地的实际文件夹)`)) {
-            try {
-                await deleteHandle(projectNameToRemove);
-                showStatus(`项目 "${projectNameToRemove}" 已被移除。`);
-                if (rootDirectoryHandle && rootDirectoryHandle.name === projectNameToRemove) {
-                    rootDirectoryHandle = null;
-                }
-                await populateProjectSelector();
-                const nextProjectName = selector.value || null;
-                await switchProject(nextProjectName);
-                if (!nextProjectName) {
-                    // 【修复】使用 replaceChildren 替代 innerHTML
-                    document.getElementById(`${prefix}file-tree-container`).replaceChildren();
-                    updateUI();
-                }
-            } catch (error) {
-                console.error("移除项目时发生错误:", error);
-                showStatus("移除项目失败！");
-            }
-        }
-    }
-
-    async function copyContent() {
-        const copyBtn = document.getElementById(`${prefix}copy-content-btn`);
-        copyBtn.disabled = true;
-        copyBtn.textContent = '正在读取...';
-        try {
-            const selectedFiles = document.querySelectorAll(`#${prefix}file-tree-container .${prefix}file-entry input[type="checkbox"]:checked`);
-            if (selectedFiles.length === 0) {
-                showStatus("没有选择任何文件！");
+            if (prompts.length === 0) {
+                const emptyItem = document.createElement('li');
+                emptyItem.textContent = '暂无提示词，请点击下方按钮添加。';
+                emptyItem.style.cssText = 'padding: 20px !important; text-align: center !important; color: #888 !important; list-style-type: none !important;';
+                promptList.appendChild(emptyItem);
                 return;
             }
-            let finalContent = '';
-            const totalFiles = selectedFiles.length;
-            let processedFiles = 0;
-            for (const checkbox of selectedFiles) {
-                const li = checkbox.closest(`.${prefix}file-entry`);
-                if (li && li.handle) {
-                    const path = li.dataset.path;
-                    const fileHandle = li.handle;
-                    if (await verifyPermission(fileHandle)) {
-                        const file = await fileHandle.getFile();
-                        const content = await file.text();
-                        finalContent += `// File: ${path}\n`;
-                        finalContent += content;
-                        finalContent += `\n\n`;
-                    } else {
-                        showStatus(`跳过文件（无权限）: ${path}`);
+
+            prompts.forEach(p => {
+                const item = document.createElement('li');
+                item.className = 'pm-item';
+                item.dataset.id = p.id;
+
+                const nameSpan = document.createElement('span');
+                nameSpan.className = 'pm-item-name';
+                nameSpan.textContent = p.name;
+
+                if (p.isDefault) {
+                    const badge = document.createElement('span');
+                    badge.className = 'default-badge';
+                    badge.textContent = '默认';
+                    nameSpan.appendChild(document.createTextNode(' ')); // 添加一个空格
+                    nameSpan.appendChild(badge);
+                }
+
+                const actionsSpan = document.createElement('span');
+                actionsSpan.className = 'pm-item-actions';
+
+                const copyBtn = document.createElement('button');
+                copyBtn.className = 'btn-copy';
+                copyBtn.textContent = '复制';
+                actionsSpan.appendChild(copyBtn);
+
+                if (!p.isDefault) {
+                    const setDefaultBtn = document.createElement('button');
+                    setDefaultBtn.className = 'btn-setdefault';
+                    setDefaultBtn.textContent = '设为默认';
+                    actionsSpan.appendChild(setDefaultBtn);
+                }
+
+                const editBtn = document.createElement('button');
+                editBtn.className = 'btn-edit';
+                editBtn.textContent = '编辑';
+                actionsSpan.appendChild(editBtn);
+
+                const deleteBtn = document.createElement('button');
+                deleteBtn.className = 'btn-delete';
+                deleteBtn.textContent = '删除';
+                actionsSpan.appendChild(deleteBtn);
+
+                item.appendChild(nameSpan);
+                item.appendChild(actionsSpan);
+                promptList.appendChild(item);
+            });
+        }
+
+        // --- 事件绑定 (无需修改) ---
+        managerBtn.addEventListener('click', async () => {
+            await renderPromptList();
+            panel.style.display = 'flex';
+        });
+        closeBtn.addEventListener('click', () => panel.style.display = 'none');
+
+        addNewBtn.addEventListener('click', () => {
+            modal.dataset.mode = 'add';
+            modal.dataset.id = '';
+            modalTitle.textContent = '添加新提示词';
+            modalNameInput.value = '';
+            modalContentInput.value = '';
+            modal.style.display = 'flex';
+        });
+
+        modalCancelBtn.addEventListener('click', () => modal.style.display = 'none');
+        modalSaveBtn.addEventListener('click', async () => {
+            const name = modalNameInput.value.trim();
+            const content = modalContentInput.value.trim();
+            if (!name || !content) {
+                alert('提示词名称和内容不能为空！');
+                return;
+            }
+
+            const prompts = await loadPrompts();
+            if (modal.dataset.mode === 'edit') {
+                const id = Number(modal.dataset.id);
+                const promptIndex = prompts.findIndex(p => p.id === id);
+                if (promptIndex > -1) {
+                    prompts[promptIndex].name = name;
+                    prompts[promptIndex].content = content;
+                }
+            } else {
+                prompts.push({
+                    id: Date.now(),
+                    name: name,
+                    content: content,
+                    isDefault: prompts.length === 0
+                });
+            }
+
+            await savePrompts(prompts);
+            await renderPromptList();
+            modal.style.display = 'none';
+        });
+
+        promptList.addEventListener('click', async (e) => {
+            const target = e.target;
+            const item = target.closest('.pm-item');
+            if (!item) return;
+
+            const id = Number(item.dataset.id);
+            let prompts = await loadPrompts();
+            const currentPrompt = prompts.find(p => p.id === id);
+
+            if (target.classList.contains('btn-copy') && currentPrompt) {
+                navigator.clipboard.writeText(currentPrompt.content).then(() => {
+                    target.textContent = '已复制!';
+                    setTimeout(() => target.textContent = '复制', 1500);
+                });
+            } else if (target.classList.contains('btn-setdefault')) {
+                prompts.forEach(p => p.isDefault = (p.id === id));
+                await savePrompts(prompts);
+                await renderPromptList();
+            } else if (target.classList.contains('btn-edit') && currentPrompt) {
+                modal.dataset.mode = 'edit';
+                modal.dataset.id = id;
+                modalTitle.textContent = '编辑提示词';
+                modalNameInput.value = currentPrompt.name;
+                modalContentInput.value = currentPrompt.content;
+                modal.style.display = 'flex';
+            } else if (target.classList.contains('btn-delete')) {
+                if (confirm('确定要删除这个提示词吗？')) {
+                    prompts = prompts.filter(p => p.id !== id);
+                    const defaultExists = prompts.some(p => p.isDefault);
+                    if (!defaultExists && prompts.length > 0) {
+                        prompts[0].isDefault = true;
                     }
-                }
-                processedFiles++;
-                copyBtn.textContent = `读取中 (${processedFiles}/${totalFiles})...`;
-            }
-            await navigator.clipboard.writeText(finalContent);
-            showStatus(`成功复制 ${processedFiles} 个文件的内容！`);
-            copyBtn.textContent = '复制成功!';
-            setTimeout(() => {
-                copyBtn.textContent = '复制选中内容到剪贴板';
-            }, 2000);
-        } catch (error) {
-            console.error("复制内容时发生错误:", error);
-            showStatus("复制失败！详情请查看控制台。");
-            copyBtn.textContent = '复制选中内容到剪贴板';
-        } finally {
-            copyBtn.disabled = false;
-        }
-    }
-
-    async function loadProjectsAndRestoreState() {
-        await populateProjectSelector();
-        const lastProjectName = localStorage.getItem(lastProjectKey);
-        const selector = document.getElementById(`${prefix}project-selector`);
-        const projectExists = Array.from(selector.options).some(opt => opt.value === lastProjectName);
-
-        if (lastProjectName && projectExists) {
-            await switchProject(lastProjectName);
-        } else {
-            updateUI();
-        }
-    }
-
-    function handleTreeClick(e) {
-        const label = e.target.closest(`.${prefix}folder-label`);
-        if (!label || e.target.type === 'checkbox') return;
-        e.preventDefault();
-        const li = label.closest(`.${prefix}folder-entry`);
-        const nestedList = li.querySelector(`.${prefix}tree-ul.${prefix}nested`);
-        if (nestedList) {
-            label.classList.toggle(`${prefix}expanded`);
-            nestedList.classList.toggle(`${prefix}active`);
-        }
-    }
-
-    function addEventListeners() {
-        document.getElementById(`${prefix}add-project-btn`).addEventListener('click', addNewProject);
-        document.getElementById(`${prefix}remove-project-btn`).addEventListener('click', removeCurrentProject);
-        document.getElementById(`${prefix}refresh-tree-btn`).addEventListener('click', renderFileTree);
-        document.getElementById(`${prefix}project-selector`).addEventListener('change', (e) => switchProject(e.target.value));
-        document.getElementById(`${prefix}copy-content-btn`).addEventListener('click', copyContent);
-        const fileTreeContainer = document.getElementById(`${prefix}file-tree-container`);
-        fileTreeContainer.addEventListener('change', handleCheckboxChange);
-        fileTreeContainer.addEventListener('click', handleTreeClick);
-
-        const header = document.getElementById(`${prefix}header`);
-        const panel = document.getElementById(`${prefix}panel`);
-        let isDragging = false, offset = { x: 0, y: 0 };
-        header.addEventListener('mousedown', (e) => {
-            isDragging = true;
-            offset.x = e.clientX - panel.offsetLeft;
-            offset.y = e.clientY - panel.offsetTop;
-            panel.style.userSelect = 'none';
-        });
-        document.addEventListener('mousemove', (e) => {
-            if (!isDragging) return;
-            panel.style.left = `${e.clientX - offset.x}px`;
-            panel.style.top = `${e.clientY - offset.y}px`;
-            panel.style.bottom = 'auto';
-            panel.style.right = 'auto';
-        });
-        document.addEventListener('mouseup', () => {
-            if (!isDragging) return;
-            isDragging = false;
-            panel.style.userSelect = 'auto';
-            try {
-                localStorage.setItem(positionStorageKey, JSON.stringify({ top: panel.style.top, left: panel.style.left }));
-            } catch (error) { console.error('保存面板位置失败:', error); }
-        });
-        document.getElementById(`${prefix}toggle-btn`).addEventListener('click', () => {
-            const body = document.getElementById(`${prefix}body`);
-            body.classList.toggle(`${prefix}hidden`);
-            document.getElementById(`${prefix}toggle-btn`).textContent = body.classList.contains(`${prefix}hidden`) ? '+' : '-';
-        });
-    }
-
-    function loadPanelPosition() {
-        const panel = document.getElementById(`${prefix}panel`);
-        try {
-            const savedPosition = localStorage.getItem(positionStorageKey);
-            if (savedPosition) {
-                const pos = JSON.parse(savedPosition);
-                if (pos && pos.top && pos.left) {
-                    panel.style.top = pos.top;
-                    panel.style.left = pos.left;
-                    panel.style.bottom = 'auto';
-                    panel.style.right = 'auto';
-                    return;
+                    await savePrompts(prompts);
+                    await renderPromptList();
                 }
             }
-        } catch (error) {
-            console.error('加载面板位置失败:', error);
-        }
-        panel.style.bottom = '20px';
-        panel.style.right = '20px';
+        });
     }
 
-    function main() {
-        if (document.readyState === 'complete' || document.readyState === 'interactive') {
-            buildUI();
-            addEventListeners();
-            loadProjectsAndRestoreState();
-            loadPanelPosition();
-        } else {
-            window.addEventListener('DOMContentLoaded', main, { once: true });
-        }
-    }
+    // --- 主监视循环 (无需修改) ---
+    setInterval(async () => {
+        const placeholder = document.querySelector('swebot-prompt-editor .ProseMirror-placeholder');
+        if (!placeholder) return;
 
-    main();
+        if (!uiCreated) {
+            createAndShowUI();
+        }
+
+        const prompts = await loadPrompts();
+        const defaultPrompt = prompts.find(p => p.isDefault);
+
+        if (defaultPrompt && document.querySelector('swebot-prompt-editor .ProseMirror-placeholder')) {
+            applyTemplate(defaultPrompt.content);
+        }
+    }, 800);
 
 })();
